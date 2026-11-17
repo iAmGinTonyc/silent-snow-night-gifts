@@ -102,8 +102,25 @@ func _ready() -> void:
 
 
 func _sync_counter() -> void:
-	var earned := int(econ.ledger["revenue"]) + int(econ.ledger["tips"])
-	order.set_info(Data.EVENINGS.size() - evening_idx, earned, econ.expenses(), econ.balance)
+	var ev: Dictionary = Data.EVENINGS[evening_idx]
+	var date_parts: PackedStringArray = str(ev["date"]).split(" ")
+	var clist: Array = ev["customers"]
+	order.set_info({
+		"night": evening_idx + 1,
+		"nights": Data.EVENINGS.size(),
+		"clock": bg.clock_minutes,
+		"date_short": "%s %s" % [date_parts[0], date_parts[1].substr(0, 3)],
+		"day": date_parts[0],
+		"month": date_parts[1].substr(0, 3).to_upper(),
+		"customer": mini(customer_idx + 1, clist.size()),
+		"customers": clist.size(),
+		"patience": (patience / patience_max) if patience_on else -1.0,
+		"secs": patience,
+		"cash": econ.balance,
+		"earned": int(econ.ledger["revenue"]) + int(econ.ledger["tips"]),
+		"spent": econ.expenses(),
+		"days": Data.EVENINGS.size() - evening_idx,
+	})
 
 
 func _process(delta: float) -> void:
@@ -131,6 +148,16 @@ func _show_screen(which: String) -> void:
 	order_root.visible = (which == "order")
 	wrap_root.visible = (which == "wrap")
 	screen = which
+	status.visible = (which == "wrap")   # на экране заказа деньги и терпение показывают вывески сверху
+	# подсказка: на экране заказа слева сверху (внизу плашки прилавка), на столе внизу
+	if which == "order":
+		hud.hint_label.position = Vector2(30, 90)
+		hud.hint_label.size = Vector2(560, 26)
+	else:
+		hud.hint_label.position = Vector2(262, 684)
+		hud.hint_label.size = Vector2(760, 26)
+	hud.hint_label.add_theme_constant_override("outline_size", 6)
+	hud.hint_label.add_theme_color_override("font_outline_color", Color(0.165, 0.102, 0.078))
 
 
 func _switch_to(which: String) -> void:

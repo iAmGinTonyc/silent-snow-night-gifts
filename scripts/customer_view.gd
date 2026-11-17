@@ -7,7 +7,7 @@ signal left
 
 const U = preload("res://scripts/util.gd")
 
-const HOME_X := 400.0
+const HOME_X := 470.0
 const ENTER_FROM := 620.0
 const FEET_Y := 337.0
 

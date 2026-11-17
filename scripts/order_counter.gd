@@ -1,57 +1,92 @@
 extends Node2D
-## Экран заказа: прилавок, касса, банка чаевых, кот, облачко с просьбой и кнопка «Принять заказ».
-## Также показывает вещь клиента на пути к столу и готовый подарок при выдаче.
+## Экран заказа: мы смотрим из-за прилавка глазами маленького эльфа. Прилавок крупным планом на первом плане,
+## на нём касса, банка чаевых, календарь, полка «в наличии», кот, кружка и рамка. Над прилавком клиент,
+## сверху четыре вывески-счётчика, внизу две плашки. Здесь же облачка речи и мыслей и подарок при выдаче.
 
-signal accept_pressed
 signal item_given
 signal offer_pressed(item_id: String)
 
 const Data = preload("res://scripts/data.gd")
 const U = preload("res://scripts/util.gd")
 const Shapes = preload("res://scripts/shapes.gd")
-const ItemArt = preload("res://scripts/item_art.gd")
 
-const COUNTER_Y := 540.0
-const CUSTOMER_HAND := Vector2(470, 470)
-const JAR_POS := Vector2(1205, 500)
-const REG_POS := Vector2(130, 500)
-const CAT_POS := Vector2(1000, 520)
-const SHELF_X0 := 550.0
-const SHELF_DX := 114.0
-const SHELF_FIT := 86.0
-const ACCEPT_RECT := Rect2(490, 598, 300, 66)
-const CUSTOMER_RECT := Rect2(280, 120, 240, 420)
-const GIFT_POS := Vector2(640, 510)
-const BUBBLE_X := 540.0
-const BUBBLE_W := 480.0   # правый край левее панели терпения вверху справа
+const T_COUNTER := preload("res://art/shop/order_counter.png")
+const T_REGISTER := preload("res://art/shop/register.png")
+const T_JAR := preload("res://art/shop/jar.png")
+const T_CALENDAR := preload("res://art/shop/calendar.png")
+const T_STAND := preload("res://art/shop/stand.png")
+const T_MUG := preload("res://art/shop/mug.png")
+const T_FRAME := preload("res://art/shop/frame.png")
+const T_PHOTOS := preload("res://art/shop/photos.png")
+const T_ITEMS := {
+	"bear": preload("res://art/shop/item_bear.png"),
+	"ornament": preload("res://art/shop/item_ornament.png"),
+	"ball": preload("res://art/shop/item_ball.png"),
+	"train": preload("res://art/shop/item_train.png"),
+}
+
+# Прилавок: плита начинается на этой высоте, всё что выше (клиент, комната) рисуется раньше
+const COUNTER_TEX_Y := 482.7
+const COUNTER_TEX_H := 237.3
+
+# Вещи на прилавке: точка на столешнице (низ спрайта по центру) и высота в игровых px
+const REG_POS := Vector2(118, 592)
+const REG_H := 262.0
+const JAR_POS := Vector2(300, 580)
+const JAR_H := 160.0
+const JAR_SLOT := Vector2(300, 432)
+const CAL_POS := Vector2(440, 575)
+const CAL_H := 150.0
+const STAND_POS := Vector2(760, 590)
+const STAND_H := 250.0
+const CAT_POS := Vector2(990, 590)
+const CAT_SCALE := 1.0 / 1.5   # кадры кота хранятся в полуторном размере
+const MUG_POS := Vector2(1075, 565)
+const MUG_H := 82.0
+const FRAME_POS := Vector2(1170, 596)
+const FRAME_H := 190.0
+const PHOTOS_POS := Vector2(1215, 640)
+const PHOTOS_H := 62.0
+
+# Полка со ступенями: куда ставится каждый товар (по порядку Data.STOCK) и его размер
+const SHELF_POS := [Vector2(765, 408), Vector2(715, 468), Vector2(805, 468), Vector2(760, 528)]
+const SHELF_SIZE := {"bear": Vector2(70, 84), "ornament": Vector2(54, 73), "ball": Vector2(92, 56), "train": Vector2(116, 46)}
+
+const CUSTOMER_HAND := Vector2(520, 470)
+const GIFT_POS := Vector2(565, 548)
+const MOUTH := Vector2(545, 345)
+
+# Вывески сверху и две плашки внизу (вставки для текста)
+const TOP_PLAQUES := [Rect2(112, 12, 246, 64), Rect2(386, 12, 248, 64), Rect2(660, 12, 246, 64), Rect2(932, 12, 248, 64)]
+const INSET_DAYS := Rect2(403, 642, 203, 54)
+const INSET_MONEY := Rect2(735, 642, 204, 55)
+
+const BUBBLE_X := 600.0
+const BUBBLE_W := 480.0
 const BUBBLE_FONT := 25
-const BUBBLE_TOP := 36.0
+const BUBBLE_TOP := 92.0
 const BUBBLE_COLOR := Color(0.99, 0.96, 0.9)
+const TEXT_LIGHT := Color("#f7e6b5")
 
 var time := 0.0
 var font: Font
 var bubble_style: StyleBoxFlat
-var button_style: StyleBoxFlat
-var jar_style: StyleBoxFlat
-var accept_enabled := false
-var accept_t := 0.0
-var hover_accept := false
+var thought_style: StyleBoxFlat
 var bubble_text := ""
 var bubble_kind := "speech"   # speech или thought (мысли клиента)
-var offer_enabled := false
-var shelf_hover := -1
-var thought_style: StyleBoxFlat
 var bubble_name := ""
 var bubble_t := 1.0
+var offer_enabled := false
+var shelf_hover := -1
 var tips_shown := 0
-var info_days := 3
-var info_earned := 0
-var info_spent := 0
-var info_cash := 0
+var info: Dictionary = {}
 var fly_coins: Array = []
 var hearts: Array = []
-var cat_ear_t := 0.0
-var cat_next_ear := 4.0
+var cat_frames: Array = []     # 16 кадров: 0-1 спит клубком, 2-6 просыпается и садится, 6-7 улыбается, 8-13 укладывается
+var cat_state := "sleep"       # sleep, wake, happy, settle
+var cat_t := 0.0
+var cat_happy_left := 0.0
+var cat_frame := 0
 var purr_cd := 0.0
 var jar_bump := 0.0
 var reg_pop := 0.0
@@ -64,6 +99,8 @@ var input_enabled := true
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
+	for i in 16:
+		cat_frames.append(load("res://art/shop/cat_%d.png" % i))
 	bubble_style = StyleBoxFlat.new()
 	bubble_style.bg_color = BUBBLE_COLOR
 	bubble_style.border_color = U.INK
@@ -78,18 +115,6 @@ func _ready() -> void:
 	thought_style.set_corner_radius_all(44)
 	thought_style.shadow_color = Color(0, 0, 0, 0.3)
 	thought_style.shadow_size = 8
-	button_style = StyleBoxFlat.new()
-	button_style.bg_color = Color("#f0c05a")
-	button_style.border_color = U.INK
-	button_style.set_border_width_all(4)
-	button_style.set_corner_radius_all(22)
-	button_style.shadow_color = Color(0, 0, 0, 0.35)
-	button_style.shadow_size = 8
-	jar_style = StyleBoxFlat.new()
-	jar_style.bg_color = Color(0.8, 0.9, 1.0, 0.12)
-	jar_style.border_color = Color(0.9, 0.95, 1.0, 0.6)
-	jar_style.set_border_width_all(3)
-	jar_style.set_corner_radius_all(14)
 
 
 # --- Публичное API -----------------------------------------------------------
@@ -118,12 +143,6 @@ func hide_bubble() -> void:
 	bubble_text = ""
 
 
-func set_accept(on: bool) -> void:
-	accept_enabled = on
-	if on:
-		accept_t = 0.0
-
-
 func set_tips(n: int) -> void:
 	tips_shown = n
 	fly_coins.clear()
@@ -131,7 +150,7 @@ func set_tips(n: int) -> void:
 
 func add_tip_coins(n: int) -> void:
 	for i in n:
-		fly_coins.append({"t": -0.22 * float(i), "from": CUSTOMER_HAND + Vector2(20, -40), "to": JAR_POS + Vector2(0, -52)})
+		fly_coins.append({"t": -0.22 * float(i), "from": CUSTOMER_HAND + Vector2(20, -20), "to": JAR_SLOT})
 
 
 func pay_pop() -> void:
@@ -139,7 +158,7 @@ func pay_pop() -> void:
 	AudioSynth.play_sfx("coin", 0.0, 0.9)
 
 
-## Вещь клиента едет на прилавок.
+## Выбранный подарок едет на прилавок.
 func give_item(item_id: String) -> void:
 	give = {"id": item_id, "t": 0.0}
 	AudioSynth.play_sfx("pop_in")
@@ -167,47 +186,88 @@ func clear_gift() -> void:
 func reset() -> void:
 	bubble_text = ""
 	offer_enabled = false
-	accept_enabled = false
 	give = {}
 	gift_look = {}
 	fly_coins.clear()
 	tips_shown = 0
 
 
+## Данные для вывесок и плашек. Ключи: night, nights, clock (минуты), date, day, month, customer, customers,
+## patience (0..1, меньше нуля если не идёт), secs, cash, earned, spent, days.
+func set_info(d: Dictionary) -> void:
+	info = d
+
+
 # --- Ввод ------------------------------------------------------------------------
+
+func _cat_size() -> Vector2:
+	var tex: Texture2D = cat_frames[cat_frame]
+	return Vector2(tex.get_width(), tex.get_height()) * CAT_SCALE
+
+
+func _cat_rect() -> Rect2:
+	var sz := _cat_size()
+	return Rect2(CAT_POS.x - sz.x * 0.5 - 6.0, CAT_POS.y - sz.y - 6.0, sz.x + 12.0, sz.y + 12.0)
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not input_enabled:
 		return
 	if event is InputEventMouseMotion:
 		var p := get_global_mouse_position()
-		hover_accept = accept_enabled and (ACCEPT_RECT.has_point(p) or CUSTOMER_RECT.has_point(p))
-		var over_cat := p.distance_to(CAT_POS + Vector2(-5, 0)) < 50.0
+		var over_cat := _cat_rect().has_point(p)
 		shelf_hover = _shelf_at(p) if offer_enabled else -1
-		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (hover_accept or over_cat or shelf_hover >= 0) else Input.CURSOR_ARROW)
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (over_cat or shelf_hover >= 0) else Input.CURSOR_ARROW)
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
 			var p2 := get_global_mouse_position()
-			if p2.distance_to(CAT_POS + Vector2(-5, 0)) < 50.0:
-				_pet_cat()
-			elif offer_enabled and _shelf_at(p2) >= 0:
+			if offer_enabled and _shelf_at(p2) >= 0:
 				AudioSynth.play_sfx("click")
 				offer_pressed.emit(str(Data.STOCK[_shelf_at(p2)]))
-			elif accept_enabled and (ACCEPT_RECT.has_point(p2) or CUSTOMER_RECT.has_point(p2)):
-				accept_enabled = false
-				hover_accept = false
-				AudioSynth.play_sfx("click")
-				accept_pressed.emit()
+			elif _cat_rect().has_point(p2):
+				_pet_cat()
 
 
 func _pet_cat() -> void:
+	if cat_state == "sleep" or cat_state == "settle":
+		cat_state = "wake"
+		cat_t = 0.0
+	elif cat_state == "happy":
+		cat_happy_left = 2.6
 	if purr_cd > 0.0:
 		return
 	purr_cd = 1.4
 	AudioSynth.play_sfx("purr")
+	var top := CAT_POS.y - _cat_size().y
 	for i in 2:
-		hearts.append({"pos": CAT_POS + Vector2(-30.0 + float(i) * 18.0, -34.0), "t": -0.2 * float(i)})
+		hearts.append({"pos": Vector2(CAT_POS.x - 30.0 + float(i) * 24.0, top + 10.0), "t": -0.2 * float(i)})
+
+
+## Кадр кота по состоянию: клубок дышит, при касании просыпается, садится и улыбается, потом укладывается.
+func _update_cat(delta: float) -> void:
+	cat_t += delta
+	if cat_state == "sleep":
+		cat_frame = int(cat_t / 1.4) % 2
+	elif cat_state == "wake":
+		var k := int(cat_t * 7.0)
+		cat_frame = 2 + mini(k, 4)
+		if k >= 4:
+			cat_state = "happy"
+			cat_t = 0.0
+			cat_happy_left = 2.6
+	elif cat_state == "happy":
+		cat_frame = 6 + int(cat_t * 3.5) % 2
+		cat_happy_left -= delta
+		if cat_happy_left <= 0.0:
+			cat_state = "settle"
+			cat_t = 0.0
+	else:
+		var k2 := int(cat_t * 4.5)
+		cat_frame = 8 + mini(k2, 5)
+		if k2 >= 6:
+			cat_state = "sleep"
+			cat_t = 0.0
 
 
 # --- Обновление ------------------------------------------------------------------
@@ -215,16 +275,11 @@ func _pet_cat() -> void:
 func _process(delta: float) -> void:
 	time += delta
 	bubble_t = minf(bubble_t + delta / 0.7, 1.0)
-	accept_t = minf(accept_t + delta / 0.5, 1.0)
 	gift_t = minf(gift_t + delta / 0.6, 1.0)
 	purr_cd = maxf(purr_cd - delta, 0.0)
 	jar_bump = maxf(jar_bump - delta * 2.5, 0.0)
 	reg_pop = maxf(reg_pop - delta * 2.2, 0.0)
-	cat_next_ear -= delta
-	if cat_next_ear <= 0.0:
-		cat_ear_t = 0.25
-		cat_next_ear = randf_range(3.0, 8.0)
-	cat_ear_t = maxf(cat_ear_t - delta, 0.0)
+	_update_cat(delta)
 	for i in range(hearts.size() - 1, -1, -1):
 		hearts[i]["t"] += delta / 1.2
 		hearts[i]["pos"] += Vector2(0.0, -28.0 * delta)
@@ -249,151 +304,134 @@ func _process(delta: float) -> void:
 
 func _draw() -> void:
 	_draw_counter()
-	_draw_register()
-	_draw_jar()
+	_draw_props()
 	_draw_shelf()
 	_draw_cat()
+	_draw_plaques()
 	_draw_gift()
 	_draw_give()
-	_draw_accept()
 	_draw_bubble()
 	_draw_coins_and_hearts()
 
 
+## Спрайт вещи: низ по центру в точке feet, высота h; squash сжимает по вертикали (прыжок кассы и банки).
+func _prop(tex: Texture2D, feet: Vector2, h: float, squash: float = 1.0, lift: float = 0.0) -> void:
+	var w := h * float(tex.get_width()) / float(tex.get_height())
+	var sx := 1.0 + (1.0 - squash) * 0.5
+	var hh := h * squash
+	draw_texture_rect(tex, Rect2(feet.x - w * sx * 0.5, feet.y - hh - lift, w * sx, hh), false)
+
+
+func _txt(pos: Vector2, text: String, size: int, col: Color, outline: bool = true, align: int = HORIZONTAL_ALIGNMENT_LEFT, width: float = -1.0) -> void:
+	if outline:
+		draw_string_outline(font, pos, text, align, width, size, 6, U.INK)
+	draw_string(font, pos, text, align, width, size, col)
+
+
 func _draw_counter() -> void:
-	draw_rect(Rect2(0, COUNTER_Y, 1280, 180), Color("#5a3a26"))
-	for i in 4:
-		var r := Rect2(30.0 + float(i) * 310.0, COUNTER_Y + 54.0, 270, 100)
-		if i == 0:
-			_draw_days_plaque(r)
-		elif i == 1:
-			_draw_money_plaque(r)
-		else:
-			draw_rect(r, Color(0, 0, 0, 0.16))
-			U.stroke(self, U.rect_pts(r), Color(0, 0, 0, 0.5), 3.0, time, 1.0)
-	draw_rect(Rect2(0, COUNTER_Y, 1280, 30), Color("#8c5d3b"))
-	draw_rect(Rect2(0, COUNTER_Y + 30.0, 1280, 6), Color(0, 0, 0, 0.3))
-	U.stroke(self, PackedVector2Array([Vector2(0, COUNTER_Y), Vector2(1280, COUNTER_Y)]), U.INK, 5.0, time, 1.3, false)
+	draw_texture_rect(T_COUNTER, Rect2(0.0, COUNTER_TEX_Y, 1280.0, COUNTER_TEX_H), false)
 
 
-## Под прилавком два игровых окошка: сколько дней до Нового года и учёт денег за ночь.
-func set_info(days: int, earned: int, spent: int, cash: int) -> void:
-	info_days = days
-	info_earned = earned
-	info_spent = spent
-	info_cash = cash
-
-
-func _holly(c: Vector2) -> void:
-	for sg in [-1.0, 1.0]:
-		var sv: float = sg
-		U.fill_stroke(self, U.ellipse(c + Vector2(sv * 9.0, 0.0), 11.0, 5.0, sv * 0.5, 16), Color("#3f8a4f"), 2.5, time)
-	for k in 3:
-		draw_circle(c + Vector2(-5.0 + float(k) * 5.0, 5.0 + (3.0 if k == 1 else 0.0)), 3.6, Color("#d8343a"))
-		draw_circle(c + Vector2(-6.0 + float(k) * 5.0, 4.0 + (3.0 if k == 1 else 0.0)), 1.1, Color(1, 1, 1, 0.7))
-
-
-## Деревянная табличка с кремовой вставкой справа. Возвращает вставку для текста.
-func _draw_plaque(r: Rect2) -> Rect2:
-	draw_rect(Rect2(r.position + Vector2(4, 6), r.size), Color(0, 0, 0, 0.3))
-	U.fill_stroke(self, U.rect_pts(r), Color("#7a4a2c"), 4.0, time)
-	draw_rect(Rect2(r.position.x + 4.0, r.position.y + 4.0, r.size.x - 8.0, 6.0), Color(1, 1, 1, 0.12))
-	var inset := Rect2(r.position.x + 98.0, r.position.y + 12.0, r.size.x - 112.0, r.size.y - 24.0)
-	U.fill_stroke(self, U.rect_pts(inset), Color("#f3e6c4"), 3.0, time)
-	_holly(r.position + Vector2(26.0, 6.0))
-	return inset
-
-
-func _draw_days_plaque(r: Rect2) -> void:
-	var inset := _draw_plaque(r)
-	# календарный листок со снежинкой
-	var cr := Rect2(r.position.x + 18.0, r.position.y + 20.0, 64.0, 66.0)
-	U.fill_stroke(self, U.rect_pts(cr), Color("#fbf1d8"), 3.0, time)
-	U.fill_stroke(self, U.rect_pts(Rect2(cr.position.x, cr.position.y, cr.size.x, 16.0)), Color("#d8343a"), 3.0, time)
-	for k in 2:
-		draw_circle(Vector2(cr.position.x + 16.0 + float(k) * 32.0, cr.position.y + 4.0), 3.0, U.INK)
-	var sc := Vector2(cr.get_center().x, cr.position.y + 42.0)
-	for k in 3:
-		var a := PI * float(k) / 3.0 + time * 0.25
-		draw_line(sc - Vector2(cos(a), sin(a)) * 15.0, sc + Vector2(cos(a), sin(a)) * 15.0, Color("#4a7fc0"), 3.0)
-	var d := str(info_days)
-	var numw := font.get_string_size(d, HORIZONTAL_ALIGNMENT_LEFT, -1, 52).x
-	draw_string(font, Vector2(inset.position.x + 14.0, inset.end.y - 20.0), d, HORIZONTAL_ALIGNMENT_LEFT, -1, 52, U.INK)
-	var label := "day to\nNew Year" if info_days == 1 else "days to\nNew Year"
-	draw_multiline_string(font, Vector2(inset.position.x + 26.0 + numw, inset.position.y + 34.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, -1, Color("#6a3d28"))
-
-
-func _draw_money_plaque(r: Rect2) -> void:
-	var inset := _draw_plaque(r)
-	# столбик монет
-	var base := Vector2(r.position.x + 50.0, r.position.y + 78.0)
-	for k in 4:
-		var c := base + Vector2(0.0, -float(k) * 11.0)
-		U.fill_stroke(self, U.ellipse(c, 25.0, 10.0, 0.0, 20), Color("#e3b84b"), 3.0, time)
-		draw_colored_polygon(U.ellipse(c + Vector2(-5.0, -2.0), 9.0, 3.0, 0.0, 12), Color(1, 0.95, 0.65, 0.7))
-	draw_string(font, Vector2(inset.position.x + 10.0, inset.position.y + 20.0), "Earned tonight", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#6a3d28"))
-	draw_string(font, Vector2(inset.position.x + 10.0, inset.position.y + 54.0), "+%d" % info_earned, HORIZONTAL_ALIGNMENT_LEFT, -1, 36, Color("#8a5a10"))
-	draw_string(font, Vector2(inset.position.x + 10.0, inset.end.y - 6.0), "spent %d  ·  cash %d" % [info_spent, info_cash], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#6a3d28"))
-
-
-func _draw_register() -> void:
-	var c := REG_POS
-	var sq := 1.0 + 0.10 * sin(reg_pop * PI) * reg_pop
-	draw_set_transform(Vector2(0.0, (c.y + 40.0) * (1.0 - sq)), 0.0, Vector2(1.0, sq))
-	U.fill_stroke(self, U.rect_pts(Rect2(c.x - 72.0, c.y - 28.0, 144.0, 70.0)), Color("#4b6a6a"), 4.0, time)
-	U.fill_stroke(self, PackedVector2Array([Vector2(c.x - 54.0, c.y - 28.0), Vector2(c.x + 54.0, c.y - 28.0), Vector2(c.x + 40.0, c.y - 64.0), Vector2(c.x - 40.0, c.y - 64.0)]), Color("#35504f"), 4.0, time)
-	draw_rect(Rect2(c.x - 32.0, c.y - 58.0, 64.0, 22.0), Color("#cfe8c8"))
-	draw_colored_polygon(U.star(Vector2(c.x, c.y - 47.0), 8.0, 3.2, 4, 0.0), Color("#35504f"))
-	for i in 6:
-		draw_circle(Vector2(c.x - 40.0 + float(i % 3) * 20.0, c.y - 10.0 + float(i / 3) * 18.0), 6.0, Color("#e8d9a8"))
-	draw_rect(Rect2(c.x - 50.0, c.y + 30.0, 100.0, 8.0), Color(0, 0, 0, 0.3))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-func _draw_jar() -> void:
-	var c := JAR_POS + Vector2(0.0, -absf(sin(jar_bump * PI * 3.0)) * 4.0 * jar_bump)
-	draw_colored_polygon(U.ellipse(c + Vector2(0, 42), 42.0, 9.0), Color(0, 0, 0, 0.28))
+func _draw_props() -> void:
+	# касса подпрыгивает, когда клиент платит
+	_prop(T_REGISTER, REG_POS, REG_H, 1.0 - 0.08 * sin(reg_pop * PI) * reg_pop)
+	# банка: монеты внутри рисуются под стеклом
+	var bump := -absf(sin(jar_bump * PI * 3.0)) * 4.0 * jar_bump
 	var n := mini(tips_shown, 48)
 	for i in n:
 		var col_i := i % 6
 		var row_i := floori(float(i) / 6.0)
-		var h := U.hash2(i, 7)
-		var p := Vector2(c.x - 24.0 + float(col_i) * 9.6 + h * 3.0, c.y + 33.0 - float(row_i) * 5.2)
-		draw_colored_polygon(U.ellipse(p, 6.2, 3.4), Color("#d9a92e"))
-		draw_circle(p + Vector2(-1.5, -0.8), 1.1, Color(1, 0.95, 0.6, 0.8))
-	draw_style_box(jar_style, Rect2(c.x - 36.0, c.y - 40.0, 72.0, 84.0))
-	U.fill_stroke(self, U.rect_pts(Rect2(c.x - 40.0, c.y - 52.0, 80.0, 14.0)), Color("#c0392b"), 3.0, time)
-	draw_string(font, Vector2(c.x - 40.0, c.y + 68.0), "Tips: " + str(tips_shown), HORIZONTAL_ALIGNMENT_CENTER, 80.0, 15, Color(1, 0.93, 0.7))
+		var hsh := U.hash2(i, 7)
+		var p := Vector2(JAR_POS.x - 29.0 + float(col_i) * 11.5 + hsh * 4.0, JAR_POS.y - 12.0 - float(row_i) * 6.5 + bump)
+		U.fill_stroke(self, U.ellipse(p, 7.5, 4.2), Color("#e3b84b"), 2.0, time, 0.4)
+		draw_circle(p + Vector2(-2.0, -1.0), 1.4, Color(1, 0.95, 0.6, 0.85))
+	_prop(T_JAR, JAR_POS, JAR_H, 1.0, -bump)
+	# настольный календарь с сегодняшней датой
+	_prop(T_CALENDAR, CAL_POS, CAL_H)
+	var day := str(info.get("day", ""))
+	if day != "":
+		draw_set_transform(Vector2(426.0, 528.0), -0.12, Vector2.ONE)
+		draw_string(font, Vector2(-30.0, 0.0), day, HORIZONTAL_ALIGNMENT_CENTER, 60.0, 38, U.INK)
+		draw_string(font, Vector2(-30.0, 20.0), str(info.get("month", "")), HORIZONTAL_ALIGNMENT_CENTER, 60.0, 16, Color("#8a4a3a"))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_prop(T_STAND, STAND_POS, STAND_H)
+	_prop(T_MUG, MUG_POS, MUG_H)
+	_prop(T_FRAME, FRAME_POS, FRAME_H)
+	_prop(T_PHOTOS, PHOTOS_POS, PHOTOS_H)
 
 
 func _draw_cat() -> void:
-	var p := CAT_POS
-	var br := 1.0 + 0.03 * sin(time * 1.6)
-	var fur := Color("#c98a4b")
-	var dark := Color("#8f5a2c")
-	draw_colored_polygon(U.ellipse(p + Vector2(8, 28), 54.0, 8.0), Color(0, 0, 0, 0.25))
-	var tail := PackedVector2Array()
-	for k in 12:
-		var u := float(k) / 11.0
-		tail.append(p + Vector2(46.0 + u * 28.0, 18.0 - sin(u * PI) * 20.0 + sin(time * 1.3 + u * 2.0) * 3.0 * u))
-	draw_polyline(tail, U.INK, 13.0, true)
-	draw_polyline(tail, fur, 8.0, true)
-	U.fill_stroke(self, U.ellipse(p + Vector2(8, 8), 46.0, 28.0 * br), fur, 3.5, time)
-	for k in 3:
-		var bx := p.x + 10.0 + float(k) * 14.0
-		draw_line(Vector2(bx, p.y - 14.0), Vector2(bx + 4.0, p.y + 2.0), dark, 3.0)
-	var hp := p + Vector2(-34, -6)
-	var tw := sin(cat_ear_t * 40.0) * 0.25 if cat_ear_t > 0.0 else 0.0
-	U.fill_stroke(self, PackedVector2Array([hp + Vector2(-20, -8), hp + Vector2(-17, -30), hp + Vector2(-4, -17)]), fur, 3.0, time)
-	var ear2 := PackedVector2Array([Vector2(20, -8), Vector2(17, -30), Vector2(4, -17)])
-	for k in ear2.size():
-		ear2[k] = hp + ear2[k].rotated(tw)
-	U.fill_stroke(self, ear2, fur, 3.0, time)
-	U.fill_stroke(self, U.ellipse(hp, 22.0, 20.0), fur, 3.5, time)
-	draw_arc(hp + Vector2(-8, -1), 5.0, 0.2, PI - 0.2, 8, U.INK, 2.5)
-	draw_arc(hp + Vector2(8, -1), 5.0, 0.2, PI - 0.2, 8, U.INK, 2.5)
-	draw_circle(hp + Vector2(0, 6), 2.4, Color("#e58a8a"))
+	var tex: Texture2D = cat_frames[cat_frame]
+	var h := float(tex.get_height()) * CAT_SCALE
+	var br := 1.0 - 0.02 * sin(time * 1.6) if cat_state == "sleep" else 1.0
+	_prop(tex, CAT_POS, h, br)
 
+
+# --- Вывески сверху и плашки внизу --------------------------------------------------
+
+func _clock_text(minutes: float) -> String:
+	var m := int(fposmod(minutes, 1440.0))
+	var h24 := m / 60
+	var h12 := (h24 + 11) % 12 + 1
+	return "%d:%02d %s" % [h12, m % 60, "AM" if h24 < 12 else "PM"]
+
+
+func _draw_heart(c: Vector2, s: float, col: Color) -> void:
+	draw_circle(c + Vector2(-4.5, -3.0) * s, 5.5 * s, col)
+	draw_circle(c + Vector2(4.5, -3.0) * s, 5.5 * s, col)
+	draw_colored_polygon(PackedVector2Array([c + Vector2(-9.5, -0.5) * s, c + Vector2(9.5, -0.5) * s, c + Vector2(0, 11.0) * s]), col)
+
+
+func _draw_plaques() -> void:
+	if info.is_empty():
+		return
+	var pl: Array = TOP_PLAQUES
+	# 1. ночь и время
+	var r1: Rect2 = pl[0]
+	_txt(Vector2(r1.position.x, r1.position.y + 29.0), "Night %d of %d" % [int(info.get("night", 1)), int(info.get("nights", 3))], 25, TEXT_LIGHT, true, HORIZONTAL_ALIGNMENT_CENTER, r1.size.x)
+	_txt(Vector2(r1.position.x, r1.position.y + 54.0), "%s · %s" % [_clock_text(float(info.get("clock", 1290.0))), str(info.get("date_short", ""))], 19, Color("#e8d4a0"), true, HORIZONTAL_ALIGNMENT_CENTER, r1.size.x)
+	# 2. терпение клиента
+	var r2: Rect2 = pl[1]
+	var pat: float = float(info.get("patience", -1.0))
+	if pat >= 0.0:
+		_draw_heart(Vector2(r2.position.x + 34.0, r2.position.y + 36.0), 1.25, Color("#e8505b"))
+		var frame := Rect2(r2.position.x + 58.0, r2.position.y + 22.0, 112.0, 26.0)
+		draw_rect(frame, Color(0.12, 0.08, 0.07, 0.85))
+		var filled := ceili(clampf(pat, 0.0, 1.0) * 10.0)
+		var seg_col := Color("#5fd37a") if pat > 0.5 else (Color("#f2c14e") if pat > 0.25 else Color("#e8505b"))
+		for i in 10:
+			if i < filled:
+				draw_rect(Rect2(frame.position.x + 3.0 + float(i) * 10.8, frame.position.y + 4.0, 8.8, frame.size.y - 8.0), seg_col)
+		var secs := int(float(info.get("secs", 0.0)))
+		_txt(Vector2(r2.position.x + 178.0, r2.position.y + 45.0), "%d:%02d" % [secs / 60, secs % 60], 24, TEXT_LIGHT, true)
+	else:
+		_txt(Vector2(r2.position.x, r2.position.y + 42.0), "Patience", 22, Color(0.9, 0.82, 0.62, 0.75), true, HORIZONTAL_ALIGNMENT_CENTER, r2.size.x)
+	# 3. касса
+	var r3: Rect2 = pl[2]
+	var cc := Vector2(r3.position.x + 40.0, r3.position.y + 36.0)
+	U.fill_stroke(self, U.ellipse(cc, 17.0, 17.0, 0.0, 22), Color("#e3b84b"), 3.0, time, 0.5)
+	draw_circle(cc + Vector2(-5.0, -5.0), 4.0, Color(1, 0.95, 0.65, 0.8))
+	_txt(Vector2(r3.position.x + 66.0, r3.position.y + 47.0), str(int(info.get("cash", 0))), 36, TEXT_LIGHT, true)
+	_txt(Vector2(r3.position.x + 150.0, r3.position.y + 28.0), "cash", 16, Color("#e8d4a0"), true)
+	# 4. чаевые и номер клиента
+	var r4: Rect2 = pl[3]
+	_txt(Vector2(r4.position.x + 20.0, r4.position.y + 28.0), "Tips", 18, Color("#e8d4a0"), true)
+	_txt(Vector2(r4.position.x + 20.0, r4.position.y + 54.0), str(tips_shown), 30, TEXT_LIGHT, true)
+	_txt(Vector2(r4.position.x + 92.0, r4.position.y + 28.0), "Customer", 18, Color("#e8d4a0"), true)
+	_txt(Vector2(r4.position.x + 92.0, r4.position.y + 54.0), "%d of %d" % [int(info.get("customer", 1)), int(info.get("customers", 1))], 28, TEXT_LIGHT, true)
+	# внизу: дней до Нового года
+	var days := int(info.get("days", 3))
+	var d := str(days)
+	var numw := font.get_string_size(d, HORIZONTAL_ALIGNMENT_LEFT, -1, 46).x
+	draw_string(font, Vector2(INSET_DAYS.position.x + 14.0, INSET_DAYS.end.y - 8.0), d, HORIZONTAL_ALIGNMENT_LEFT, -1, 46, U.INK)
+	var label := "day to\nNew Year" if days == 1 else "days to\nNew Year"
+	draw_multiline_string(font, Vector2(INSET_DAYS.position.x + 24.0 + numw, INSET_DAYS.position.y + 24.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, -1, Color("#6a3d28"))
+	# внизу: учёт денег за ночь
+	draw_string(font, Vector2(INSET_MONEY.position.x + 12.0, INSET_MONEY.position.y + 26.0), "Earned +%d" % int(info.get("earned", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color("#8a5a10"))
+	draw_string(font, Vector2(INSET_MONEY.position.x + 12.0, INSET_MONEY.end.y - 7.0), "spent %d  ·  cash %d" % [int(info.get("spent", 0)), int(info.get("cash", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#6a3d28"))
+
+
+# --- Монеты и сердечки ----------------------------------------------------------------
 
 func _draw_coins_and_hearts() -> void:
 	for fc in fly_coins:
@@ -414,19 +452,6 @@ func _draw_coins_and_hearts() -> void:
 		draw_circle(pos2 + Vector2(-4, -3), 5.0, col)
 		draw_circle(pos2 + Vector2(4, -3), 5.0, col)
 		draw_colored_polygon(PackedVector2Array([pos2 + Vector2(-9, 0), pos2 + Vector2(9, 0), pos2 + Vector2(0, 11)]), col)
-
-
-func _draw_accept() -> void:
-	if not accept_enabled:
-		return
-	var s := U.ease_out_back(accept_t) * (1.0 + 0.03 * sin(time * 4.0))
-	if hover_accept:
-		s *= 1.05
-	var c := ACCEPT_RECT.get_center()
-	draw_set_transform(c * (1.0 - s), 0.0, Vector2(s, s))
-	draw_style_box(button_style, ACCEPT_RECT)
-	draw_string(font, Vector2(ACCEPT_RECT.position.x, c.y + 11.0), "Take the order", HORIZONTAL_ALIGNMENT_CENTER, ACCEPT_RECT.size.x, 30, U.INK)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_bubble() -> void:
@@ -450,7 +475,7 @@ func _draw_bubble() -> void:
 			draw_colored_polygon(U.star(sp, 7.0, 2.6, 4, time + float(k)), Color(0.7, 0.8, 1.0, 0.6 + 0.4 * sin(time * 4.0 + float(k))))
 	else:
 		draw_style_box(bubble_style, rect)
-		var tail := PackedVector2Array([Vector2(rect.position.x + 20.0, rect.end.y - 64.0), Vector2(rect.position.x + 20.0, rect.end.y - 14.0), Vector2(478, 290)])
+		var tail := PackedVector2Array([Vector2(rect.position.x + 20.0, rect.end.y - 64.0), Vector2(rect.position.x + 20.0, rect.end.y - 14.0), MOUTH])
 		draw_colored_polygon(tail, BUBBLE_COLOR)
 		draw_polyline(PackedVector2Array([tail[0], tail[2], tail[1]]), U.INK, 4.0, true)
 		draw_rect(Rect2(rect.position.x + 17.0, rect.end.y - 62.0, 6.0, 46.0), BUBBLE_COLOR)
@@ -460,30 +485,20 @@ func _draw_bubble() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-# --- Вещь и подарок --------------------------------------------------------------
+# --- Подарок ---------------------------------------------------------------------------
 
 func _draw_give() -> void:
 	if give.is_empty():
 		return
 	var t: float = give["t"]
 	var id: String = give["id"]
-	var it: Dictionary = Data.ITEMS[id]
 	var a := CUSTOMER_HAND
 	var b := GIFT_POS
 	var e := U.ease_in_out(t)
 	var pos := a.lerp(b, e) + Vector2(0.0, -sin(e * PI) * 90.0)
-	var s := 0.55 + 0.1 * sin(e * PI)
-	draw_set_transform(pos, 0.0, Vector2(s, s))
-	var col := Color.html(it["color"])
-	var kind: String = it["kind"]
-	if kind == "box":
-		var w := float(it["w"])
-		var h := float(it["h"])
-		U.fill_stroke(self, U.rect_pts(Rect2(-w * 0.5, -h * 0.5, w, h)), col, 5.0, time)
-		draw_rect(Rect2(-9.0, -h * 0.5, 18.0, h), Color("#dccfab"))
-	else:
-		ItemArt.draw(self, kind, it, time)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var s := 1.0 + 0.1 * sin(e * PI)
+	var sz: Vector2 = SHELF_SIZE[id]
+	draw_texture_rect(T_ITEMS[id], Rect2(pos - sz * s * 0.5, sz * s), false)
 
 
 func _draw_gift() -> void:
@@ -539,15 +554,11 @@ func _draw_gift() -> void:
 
 # --- Полка «в наличии» ----------------------------------------------------------
 
-func _shelf_scale(i: int) -> float:
-	var it: Dictionary = Data.ITEMS[str(Data.STOCK[i])]
-	var fit := SHELF_FIT * (1.3 if str(it["kind"]) == "train" else 1.0)
-	return fit / maxf(float(it["w"]), float(it["h"]))
-
-
 func _shelf_rect(i: int) -> Rect2:
-	var x := SHELF_X0 + float(i) * SHELF_DX
-	return Rect2(x - 52.0, COUNTER_Y - 104.0, 104.0, 108.0)
+	var id := str(Data.STOCK[i])
+	var sz: Vector2 = SHELF_SIZE[id]
+	var p: Vector2 = SHELF_POS[i]
+	return Rect2(p.x - sz.x * 0.5, p.y - sz.y, sz.x, sz.y).grow(8.0)
 
 
 func _shelf_at(p: Vector2) -> int:
@@ -558,29 +569,19 @@ func _shelf_at(p: Vector2) -> int:
 
 
 func _draw_shelf() -> void:
-	# табличка и деревянная подставка
-	var x0 := SHELF_X0 - 62.0
-	var x1 := SHELF_X0 + float(Data.STOCK.size() - 1) * SHELF_DX + 62.0
-	draw_rect(Rect2(x0, COUNTER_Y - 6.0, x1 - x0, 8.0), Color("#a87c52"))
-	U.stroke(self, U.rect_pts(Rect2(x0, COUNTER_Y - 6.0, x1 - x0, 8.0)), U.INK, 3.0, time, 1.0)
-	draw_string(font, Vector2(x0, COUNTER_Y + 22.0), "In stock", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.93, 0.75, 0.8))
 	for i in Data.STOCK.size():
 		var id := str(Data.STOCK[i])
-		var it: Dictionary = Data.ITEMS[id]
-		var kind: String = it["kind"]
-		var sc := _shelf_scale(i)
+		var sz: Vector2 = SHELF_SIZE[id]
+		var p: Vector2 = SHELF_POS[i]
 		var hov := (i == shelf_hover)
 		var hint := 0.0
 		if offer_enabled:
 			hint = 0.5 + 0.5 * sin(time * 4.0 + float(i))
-		var s := sc * (1.14 if hov else 1.0 + 0.03 * hint)
-		var x := SHELF_X0 + float(i) * SHELF_DX
-		var half_h := float(it["h"]) * 0.5 * s
+		var k := 1.14 if hov else 1.0 + 0.03 * hint
+		var s2 := sz * k
 		if hov:
-			draw_circle(Vector2(x, COUNTER_Y - 6.0 - half_h), 56.0, Color(1.0, 0.92, 0.55, 0.22))
-		draw_set_transform(Vector2(x, COUNTER_Y - 8.0 - half_h), 0.0, Vector2(s, s))
-		ItemArt.draw(self, kind, it, time)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			draw_circle(p + Vector2(0.0, -sz.y * 0.5), 52.0, Color(1.0, 0.92, 0.55, 0.28))
+		draw_texture_rect(T_ITEMS[id], Rect2(p.x - s2.x * 0.5, p.y - s2.y, s2.x, s2.y), false)
 		if hov:
-			var nm: String = it["name"]
-			draw_string(font, Vector2(x - 60.0, COUNTER_Y - 112.0), nm, HORIZONTAL_ALIGNMENT_CENTER, 120.0, 15, Color(1, 0.96, 0.85, 0.95))
+			var it: Dictionary = Data.ITEMS[id]
+			_txt(Vector2(p.x - 80.0, p.y - sz.y - 18.0), str(it["name"]), 17, Color(1, 0.96, 0.85, 0.98), true, HORIZONTAL_ALIGNMENT_CENTER, 160.0)
