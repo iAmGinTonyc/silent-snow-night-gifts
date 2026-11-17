@@ -28,6 +28,10 @@ var evening_idx := 0
 var customer_idx := 0
 var current: Dictionary = {}
 var epoch := 0
+var redo_count := 0
+var current_match := ""     # у покупателя: perfect, ok или miss
+var chosen_item := ""
+var patience_paused := false
 var screen := "order"
 var patience_max := 150.0
 var patience := 0.0
@@ -81,6 +85,7 @@ func _ready() -> void:
 	wrap.gift_ready.connect(_on_gift_ready)
 	customer.arrived.connect(_on_customer_arrived)
 	order.accept_pressed.connect(_on_accept)
+	order.offer_pressed.connect(_on_offer)
 	hud.start_pressed.connect(_start_game)
 	hud.next_pressed.connect(_on_next_evening)
 	hud.shop_pressed.connect(_on_shop_open)
@@ -98,10 +103,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if not patience_on:
+	if not patience_on or patience_paused:
 		return
 	patience -= delta
-	status.set_patience(patience / patience_max)
+	status.set_patience(patience / patience_max, patience)
 	if patience <= 0.0:
 		patience_on = false
 		_on_timeout()
@@ -123,10 +128,13 @@ func _show_screen(which: String) -> void:
 
 
 func _switch_to(which: String) -> void:
+	var prev := patience_paused
+	patience_paused = true
 	AudioSynth.play_sfx("whoosh")
 	await fx.iris_out(0.36)
 	_show_screen(which)
 	await fx.iris_in(0.36)
+	patience_paused = prev
 
 
 # --- Вечер и клиенты --------------------------------------------------------------
@@ -150,10 +158,11 @@ func _begin_evening() -> void:
 	bg.set_clock_instant(float(clock[0]))
 	patience_max = float(ev["patience"])
 	customer_idx = 0
+	redo_count = 0
 	order.reset()
 	order.input_enabled = false
 	status.show_patience(false)
-	hud.show_title("Ночь %d из %d" % [evening_idx + 1, Data.EVENINGS.size()], str(ev["date"]) + " · " + str(ev["place"]))
+	hud.show_title("Night %d of %d" % [evening_idx + 1, Data.EVENINGS.size()], str(ev["date"]) + " · " + str(ev["place"]))
 	await get_tree().create_timer(2.4).timeout
 	if e != epoch:
 		return
@@ -167,6 +176,7 @@ func _next_customer() -> void:
 		_end_evening()
 		return
 	current = list[customer_idx]
+	redo_count = 0
 	var clock: Array = ev["clock"]
 	var frac := float(customer_idx) / float(maxi(list.size() - 1, 1))
 	bg.set_clock(lerpf(float(clock[0]), float(clock[1]), frac))
@@ -175,10 +185,75 @@ func _next_customer() -> void:
 	customer.arrive(current)
 
 
+func _is_buyer() -> bool:
+	return current.get("kind", "wrap") == "buyer"
+
+
 func _on_customer_arrived() -> void:
+	current_match = ""
+	chosen_item = ""
+	if _is_buyer():
+		# покупатель: не принёс вещь, ему нужен подарок из наличия
+		if current["mode"] == "mind":
+			order.show_thought(current["name"], current["thought"])
+			hud.set_hint("We can read their mind: pick a gift from the shelf")
+		else:
+			order.show_bubble(current["name"], current["request"])
+			hud.set_hint("They ask for a gift: pick it from the shelf")
+		order.input_enabled = true
+		order.set_offer(true)
+		patience = patience_max
+		patience_on = true
+		status.show_patience(true)
+		status.set_patience(1.0, patience_max)
+		return
 	order.show_bubble(current["name"], current["request"])
 	order.input_enabled = true
 	order.set_accept(true)
+
+
+## Покупателю предлагают подарок с полки. Угадали мысли, и он радостнее и охотнее даёт чаевые.
+func _on_offer(offered: String) -> void:
+	if not _is_buyer():
+		return
+	var e := epoch
+	var ideal: String = current["ideal"]
+	var okay: Array = current["okay"]
+	var level := "miss"
+	if offered == ideal:
+		level = "perfect"
+	elif okay.has(offered):
+		level = "ok"
+	if current["mode"] == "ask" and level != "perfect":
+		hud.show_toast("That is not what they asked for")
+		customer.set_mood(0)
+		AudioSynth.play_sfx("dull")
+		return
+	order.set_offer(false)
+	order.input_enabled = false
+	patience_paused = true
+	hud.set_hint("")
+	current_match = level
+	chosen_item = offered
+	var it: Dictionary = Data.ITEMS[offered]
+	_on_cost("stock", int(it["stock"]))
+	order.give_item(offered)
+	customer.set_mood(2 if level == "perfect" else (1 if level == "ok" else 0))
+	order.show_bubble(current["name"], str(Data.BUYER_LINES[level]))
+	await order.item_given
+	if e != epoch:
+		return
+	await get_tree().create_timer(1.6).timeout
+	if e != epoch:
+		return
+	order.hide_bubble()
+	await _switch_to("wrap")
+	if e != epoch:
+		return
+	wrap.set_ticket(current["name"], Data.ticket_lines(current, offered))
+	wrap.place_item(offered)
+	wrap.input_enabled = true
+	patience_paused = false
 
 
 ## Клиент отдаёт вещь, экран переключается на рабочий стол.
@@ -193,27 +268,28 @@ func _on_accept() -> void:
 	await _switch_to("wrap")
 	if e != epoch:
 		return
-	wrap.set_ticket(current["name"], Data.ticket_lines(current))
+	wrap.set_ticket(current["name"], Data.ticket_lines(current, str(current["item"])))
 	wrap.place_item(current["item"])
 	wrap.input_enabled = true
 	patience = patience_max
 	patience_on = true
 	status.show_patience(true)
-	status.set_patience(1.0)
+	status.set_patience(1.0, patience_max)
 
 
 func _on_timeout() -> void:
 	var e := epoch
 	wrap.input_enabled = false
+	order.set_offer(false)
 	status.show_patience(false)
-	hud.show_toast("Клиент устал ждать и ушёл")
+	hud.show_toast("The customer got tired of waiting and left")
 	if screen != "order":
 		await _switch_to("order")
 		if e != epoch:
 			return
 	wrap.clear_gift()
 	customer.set_mood(0)
-	order.show_bubble(current["name"], "Простите, я не могу так долго ждать…")
+	order.show_bubble(current["name"], "Sorry, I cannot wait this long...")
 	await get_tree().create_timer(2.6).timeout
 	if e != epoch:
 		return
@@ -233,7 +309,7 @@ func _customer_leaves(e: int) -> void:
 	_next_customer()
 
 
-## Подарок готов: возвращаемся к клиенту, платим и считаем чаевые.
+## Подарок готов: возвращаемся к клиенту. Кривой подарок клиент может вернуть или не оплатить.
 func _on_gift_ready(res: Dictionary) -> void:
 	var e := epoch
 	patience_on = false
@@ -248,12 +324,63 @@ func _on_gift_ready(res: Dictionary) -> void:
 	await get_tree().create_timer(0.7).timeout
 	if e != epoch:
 		return
-	var it: Dictionary = Data.ITEMS[current["item"]]
-	econ.earn(int(it["price"]))
+	var item_id: String = res["look"]["item_id"]
+	var neat: float = res["neat"]
+
+	# чем кривее подарок, тем выше шанс, что клиент расстроится
+	var outcome := "pay"
+	if neat < 0.7:
+		var roll := randf()
+		var can_redo := redo_count < 1
+		if neat >= 0.4:
+			if roll < 0.35 and can_redo:
+				outcome = "redo"
+		elif roll < 0.35 and can_redo:
+			outcome = "redo"
+		elif roll < 0.70:
+			outcome = "refuse"
+	if outcome == "redo":
+		redo_count += 1
+		customer.set_mood(0)
+		order.show_bubble(current["name"], "That came out crooked. Please do it again.")
+		await get_tree().create_timer(2.4).timeout
+		if e != epoch:
+			return
+		order.hide_bubble()
+		order.clear_gift()
+		await _switch_to("wrap")
+		if e != epoch:
+			return
+		wrap.place_item(item_id)
+		wrap.input_enabled = true
+		patience = minf(patience + 25.0, patience_max)
+		patience_on = true
+		status.show_patience(true)
+		status.set_patience(patience / patience_max, patience)
+		return
+	if outcome == "refuse":
+		customer.set_mood(0)
+		order.show_bubble(current["name"], "What is this? I am not paying for that.")
+		await get_tree().create_timer(2.8).timeout
+		if e != epoch:
+			return
+		order.clear_gift()
+		await _customer_leaves(e)
+		return
+
+	var it: Dictionary = Data.ITEMS[item_id]
+	var buyer := _is_buyer()
+	var pay: int = int(it["sell"]) if buyer else int(it["price"])
+	econ.earn(pay)
 	status.set_money(econ.balance)
 	order.pay_pop()
 
 	var s := _evaluate(current, res)
+	if neat < 0.4:
+		s -= 0.30
+	elif neat < 0.7:
+		s -= 0.15
+	s = clampf(s, 0.0, 1.0)
 	var tips := 1
 	var mood := 0
 	var line: String = current["meh"]
@@ -267,11 +394,26 @@ func _on_gift_ready(res: Dictionary) -> void:
 		line = current["ok"]
 	if frac < 0.25:
 		tips = maxi(tips - 1, 1)
+	if buyer:
+		var chance := 0.8
+		if current_match == "perfect":
+			tips = maxi(tips, 2)
+			chance = 1.0
+		elif current_match == "miss":
+			chance = 0.4
+		if randf() > chance:
+			tips = 0
+	if neat < 0.4:
+		tips = 0
+	if tips == 0:
+		line = current["meh"]
+		mood = mini(mood, 1)
 	customer.set_mood(mood)
 	order.show_bubble(current["name"], line)
-	order.add_tip_coins(tips)
-	econ.add_tip(tips)
-	tips_total += tips
+	if tips > 0:
+		order.add_tip_coins(tips)
+		econ.add_tip(tips)
+		tips_total += tips
 	await get_tree().create_timer(2.9).timeout
 	if e != epoch:
 		return
@@ -326,13 +468,15 @@ func _evaluate(c: Dictionary, r: Dictionary) -> float:
 			s += 0.10 if bow <= 0.8 else -0.05
 		else:
 			s -= 0.10
-	var item_kind: String = Data.ITEMS[c["item"]]["kind"]
+	var item_kind: String = Data.ITEMS[r["look"]["item_id"]]["kind"]
 	if item_kind != "box":
 		var want_wrap: String = c["wrap"]
 		var got_wrap: String = r["wrap_choice"]
 		if want_wrap == "box" or want_wrap == "shape":
 			s += 0.15 if got_wrap == want_wrap else -0.25
 	s += float(r["bonus"])
+	if _is_buyer():
+		s += {"perfect": 0.25, "ok": 0.10, "miss": -0.15}.get(current_match, 0.0)
 	return clampf(s, 0.0, 1.0)
 
 
@@ -368,9 +512,9 @@ func _on_buy(idx: int) -> void:
 		_apply_inventory()
 		shop_list = econ.shop_items()
 		hud.refresh_shop(shop_list, econ.balance)
-		hud.show_shop_note("Куплено: " + str(it["name"]))
+		hud.show_shop_note("Bought: " + str(it["name"]))
 	else:
-		hud.show_shop_note("Не хватает монет")
+		hud.show_shop_note("Not enough coins")
 
 
 func _final() -> void:

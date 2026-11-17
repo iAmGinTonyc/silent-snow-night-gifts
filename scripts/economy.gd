@@ -32,7 +32,7 @@ func _source(kind: String) -> Array:
 
 
 func new_evening() -> void:
-	ledger = {"revenue": 0, "tips": 0, "paper": 0, "waste": 0, "tape": 0, "ribbon": 0, "box": 0}
+	ledger = {"revenue": 0, "tips": 0, "paper": 0, "waste": 0, "tape": 0, "ribbon": 0, "box": 0, "stock": 0}
 
 
 func earn(amount: int) -> void:
@@ -51,7 +51,7 @@ func add_tip(n: int) -> void:
 
 func expenses() -> int:
 	var s := 0
-	for k in ["paper", "waste", "tape", "ribbon", "box"]:
+	for k in ["paper", "waste", "tape", "ribbon", "box", "stock"]:
 		s += int(ledger[k])
 	return s
 

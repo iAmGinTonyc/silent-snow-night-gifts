@@ -1,6 +1,7 @@
 extends SceneTree
 ## Дымовой тест без окна: godot --headless --path . --script res://tools/smoke.gd
-## Проходит клиентов подряд и печатает состояние. Ошибки скриптов и рисования попадают в вывод.
+## Проходит всех клиентов подряд (покупатели и обычные), один раз заворачивает криво и печатает состояние.
+## Ошибки скриптов и рисования попадают в вывод.
 
 var main
 var failed := false
@@ -24,14 +25,103 @@ func wait_until(cond: Callable, timeout_s: float, label: String) -> bool:
 	return true
 
 
+## Заворачивает подарок на столе: идеально или криво.
+func wrap_gift(perfect: bool, vertical: bool) -> bool:
+	var w = main.wrap
+	var ok := await wait_until(func(): return w.step == w.Step.CHOOSE or w.step == w.Step.PAPER, 30.0, "wrap ready")
+	if not ok:
+		return false
+	if w.step == w.Step.CHOOSE:
+		var idx := 0
+		if main.current.get("wrap", "free") == "shape":
+			idx = w.cards.size() - 1
+		w._choose_card(idx)
+		print("   chose: ", w.wrap_mode, " box_idx=", w.box_idx)
+	var paper_slot := 0
+	var want: String = main.current.get("paper", "any")
+	if want != "any":
+		for s in w.inv_papers.size():
+			var pp: Dictionary = main.Data.PAPERS[int(w.inv_papers[s])]
+			if pp["tag"] == want:
+				paper_slot = s
+	w._select_paper(paper_slot)
+	if vertical:
+		w._set_axis("v")
+	var along: float = w._along()
+	w.pull_len = clampf((w._l_min() + 60.0) if perfect else (along + 40.0), 60.0, w._pull_max())
+	w.sheet_len = w.pull_len
+	w.pull_moved = true
+	w._finish_pull()
+	w._select_tool("scissors")
+	w._do_cut(w.CENTER + Vector2(w._u_start() + 30.0, 0.0).rotated(w.rot))
+	await create_timer(0.6).timeout
+	if w.step != w.Step.WRAP:
+		print("   cut failed, step=", w.step)
+		failed = true
+	var fh: float = w._flap_len()
+	var hw: float = w._along() * 0.5
+	var hh: float = w._across() * 0.5
+	var starts: Array = [Vector2(-hw - fh * 0.8, 0.0), Vector2(hw + fh * 0.8, 0.0), Vector2(0.0, -hh - 22.0), Vector2(0.0, hh + 22.0)]
+	var ends: Array = [Vector2(10.0, 0.0), Vector2(-10.0, 0.0), Vector2(0.0, 10.0), Vector2(0.0, -10.0)]
+	var count := 4 if perfect else 1
+	for i in count:
+		var a: Vector2 = starts[i]
+		var b: Vector2 = ends[i]
+		w._begin_flap_drag(w.CENTER + a.rotated(w.rot))
+		w._update_flap_drag(w.CENTER + b.rotated(w.rot))
+		if w.flap_drag < 0:
+			print("   flap ", i, " was not picked")
+			failed = true
+		w._end_flap_drag()
+	if perfect:
+		ok = await wait_until(func(): return w.tucked, 10.0, "tucked")
+		if not ok:
+			return false
+		await create_timer(1.0).timeout
+		w._select_tool("tape")
+		var x0: float = -w.item_w * 0.4
+		w._begin_stroke(w.CENTER + Vector2(x0, 0.0))
+		var xx: float = x0
+		while xx < w.item_w * 0.4:
+			xx += 10.0
+			w._move_stroke(w.CENTER + Vector2(xx, 0.0))
+		w._end_stroke()
+		w._select_tool("tape")
+		if w.active_tool != "":
+			print("   tool not released")
+			failed = true
+		if main.current.get("ribbon", "any") != "none":
+			w._select_ribbon_tool(0)
+			w._begin_stroke(w.CENTER + Vector2(-w.item_w * 0.45, 4.0))
+			xx = -w.item_w * 0.45
+			while xx < w.item_w * 0.45:
+				xx += 10.0
+				w._move_stroke(w.CENTER + Vector2(xx, 4.0))
+			w._end_stroke()
+			w._begin_stroke(w.CENTER + Vector2(4.0, -w.item_h * 0.45))
+			var yy: float = -w.item_h * 0.45
+			while yy < w.item_h * 0.45:
+				yy += 10.0
+				w._move_stroke(w.CENTER + Vector2(4.0, yy))
+			w._end_stroke()
+			if not w._has_ribbon():
+				print("   ribbon not drawn")
+				failed = true
+	await create_timer(0.8).timeout
+	var nt: Dictionary = w._neatness()
+	print("   neat=%.2f cover=%.2f ends=%d" % [nt["neat"], nt["cover"], nt["ends"]])
+	w._try_deliver()
+	return true
+
+
 func run() -> void:
 	await process_frame
 	Engine.time_scale = 3.0
 	main._start_game()
 	var served := 0
-	while served < 20:
-		# конец вечера: если открыта панель итогов, идём дальше; на финале выходим
-		var ok := await wait_until(func(): return (main.customer.state == "idle" and main.order.accept_enabled) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
+	var crooked_done := false
+	while served < 30:
+		var ok := await wait_until(func(): return (main.customer.state == "idle" and (main.order.accept_enabled or main.order.offer_enabled)) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
 		if not ok:
 			break
 		if main.hud.final_root.visible:
@@ -42,7 +132,6 @@ func run() -> void:
 			main.hud.summary_root.visible = false
 			main._on_shop_open()
 			var items: Array = main.shop_list
-			print("shop items: ", items.size())
 			if items.size() > 0:
 				main._on_buy(0)
 				main._on_buy(items.size() - 1)
@@ -50,48 +139,35 @@ func run() -> void:
 			main._on_next_evening()
 			continue
 		var cname: String = main.current["name"]
-		var item_id: String = main.current["item"]
-		var wrap_pref: String = main.current["wrap"]
-		print("--- ", cname, " item=", item_id, " wants wrap=", wrap_pref)
-		main._on_accept()
-		ok = await wait_until(func(): return main.wrap.step == main.wrap.Step.CHOOSE or main.wrap.step == main.wrap.Step.PAPER, 30.0, "wrap ready")
-		if not ok:
-			break
-		var w = main.wrap
-		if w.step == w.Step.CHOOSE:
-			var idx := 0
-			if wrap_pref == "shape":
-				idx = w.cards.size() - 1
-			w._choose_card(idx)
-			print("   chose: ", w.wrap_mode, " box_idx=", w.box_idx)
-		var paper_slot := 0
-		if main.current["paper"] != "any":
-			for s in w.inv_papers.size():
-				var pp: Dictionary = main.Data.PAPERS[int(w.inv_papers[s])]
-				if pp["tag"] == main.current["paper"]:
-					paper_slot = s
-		w._select_paper(paper_slot)
-		w.sheet_len = w._l_min() + 40.0
-		w._finish_cut()
-		for side in [0, 1]:
-			w.flap_drag = side
-			w.theta[side] = 0.0
-			w._end_flap_drag()
-		ok = await wait_until(func(): return w.step == w.Step.TAPE, 10.0, "tuck")
-		if not ok:
-			break
-		await create_timer(1.2).timeout
-		w._try_tape(w.CENTER + Vector2(w.seam_x, 0.0))
-		if w.step != w.Step.DONE:
-			print("   tape failed, step=", w.step)
-			failed = true
-		if main.current["ribbon"] != "none":
-			w._select_ribbon(0)
-		await create_timer(0.8).timeout
 		var before: int = main.customer_idx
-		w._try_deliver()
+		if main.current.get("kind", "wrap") == "buyer":
+			var ideal: String = main.current["ideal"]
+			print("--- ", cname, " (покупатель, ", main.current["mode"], ") ideal=", ideal)
+			if main.current["mode"] == "ask":
+				var wrong := "bear" if ideal != "bear" else "train"
+				main._on_offer(wrong)
+				await create_timer(0.3).timeout
+			var pick := ideal
+			if main.current["mode"] == "mind" and served % 3 == 1:
+				pick = "bear" if ideal != "bear" else "ornament"
+			main._on_offer(pick)
+		else:
+			print("--- ", cname, " item=", main.current["item"], " wants wrap=", main.current["wrap"])
+			main._on_accept()
+		var perfect := crooked_done or served != 2
+		crooked_done = crooked_done or not perfect
+		var attempts := 0
+		while true:
+			attempts += 1
+			ok = await wrap_gift(perfect or attempts > 1, served % 2 == 1)
+			if not ok:
+				break
+			served += 0
+			var r := await wait_until(func(): return main.customer_idx > before or main.hud.summary_root.visible or main.hud.final_root.visible or (main.screen == "wrap" and (main.wrap.step == main.wrap.Step.CHOOSE or main.wrap.step == main.wrap.Step.PAPER)), 60.0, "served or redo")
+			if not r or main.customer_idx > before or main.hud.summary_root.visible or main.hud.final_root.visible:
+				break
+			print("   клиент просит переделать, попытка ", attempts + 1)
 		served += 1
-		await wait_until(func(): return main.customer_idx > before or main.hud.summary_root.visible or main.hud.final_root.visible, 40.0, "customer served")
 		print("   balance=", main.econ.balance, " tips_total=", main.tips_total)
 	print("DONE served=", served, " failed=", failed)
 	quit()

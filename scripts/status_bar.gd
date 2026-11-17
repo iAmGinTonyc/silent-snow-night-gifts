@@ -11,6 +11,7 @@ var target := 0
 var pulse := 0.0
 var pulse_sign := 1
 var patience := 1.0
+var patience_secs := 0.0
 var patience_on := false
 var time := 0.0
 var font: Font
@@ -41,8 +42,10 @@ func show_patience(on: bool) -> void:
 	patience_on = on
 
 
-func set_patience(p: float) -> void:
+func set_patience(p: float, secs: float = -1.0) -> void:
 	patience = clampf(p, 0.0, 1.0)
+	if secs >= 0.0:
+		patience_secs = secs
 
 
 func _process(delta: float) -> void:
@@ -77,28 +80,28 @@ func _draw() -> void:
 
 
 func _draw_patience() -> void:
-	var origin := Vector2(1052.0, 70.0)
+	var panel := Rect2(1030, 62, 240, 42)
 	var low := patience < 0.28
 	var beat := 1.0
 	if low:
-		beat = 1.0 + 0.16 * absf(sin(time * 7.0))
+		beat = 1.0 + 0.05 * absf(sin(time * 7.0))
+	var c := panel.get_center()
+	draw_set_transform(c * (1.0 - beat), 0.0, Vector2(beat, beat))
+	draw_style_box(badge_style, panel)
 	# сердце
-	var hc := origin + Vector2(14, 14)
-	draw_set_transform(hc * (1.0 - beat), 0.0, Vector2(beat, beat))
+	var hc := Vector2(panel.position.x + 26.0, c.y)
 	var heart := PackedVector2Array()
 	for k in 24:
 		var a := TAU * float(k) / 24.0
 		var x := 16.0 * pow(sin(a), 3.0)
 		var y := -(13.0 * cos(a) - 5.0 * cos(2.0 * a) - 2.0 * cos(3.0 * a) - cos(4.0 * a))
-		heart.append(hc + Vector2(x, y) * 0.95)
+		heart.append(hc + Vector2(x, y) * 0.85)
 	U.fill_stroke(self, heart, Color("#e04a4a") if not low else Color("#ff3a3a"), 3.0, time)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# полоса из делений
-	var frame := Rect2(origin.x + 38.0, origin.y, 176.0, 28.0)
-	draw_rect(frame, Color(0.13, 0.09, 0.11, 0.92))
-	draw_rect(frame, Color(0.93, 0.82, 0.58), false, 3.0)
+	var frame := Rect2(panel.position.x + 52.0, panel.position.y + 9.0, 118.0, 24.0)
+	draw_rect(frame, Color(0.2, 0.15, 0.17))
 	var filled := ceili(patience * float(SEGMENTS))
-	var seg_w := (frame.size.x - 10.0) / float(SEGMENTS)
+	var seg_w := (frame.size.x - 8.0) / float(SEGMENTS)
 	for i in SEGMENTS:
 		if i < filled:
 			var col := Color("#6bd36b")
@@ -106,4 +109,10 @@ func _draw_patience() -> void:
 				col = Color("#f2c14e")
 			if patience < 0.28:
 				col = Color("#ef5a4a")
-			draw_rect(Rect2(frame.position.x + 5.0 + float(i) * seg_w, frame.position.y + 5.0, seg_w - 3.0, frame.size.y - 10.0), col)
+			draw_rect(Rect2(frame.position.x + 4.0 + float(i) * seg_w, frame.position.y + 4.0, seg_w - 2.0, frame.size.y - 8.0), col)
+	# время до ухода клиента
+	var secs := maxi(int(ceil(patience_secs)), 0)
+	var txt := "%d:%02d" % [secs / 60, secs % 60]
+	var tcol := Color(1.0, 0.93, 0.7) if not low else Color(1.0, 0.55, 0.5)
+	draw_string(font, Vector2(panel.position.x + 176.0, c.y + 8.0), txt, HORIZONTAL_ALIGNMENT_LEFT, 60.0, 22, tcol)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

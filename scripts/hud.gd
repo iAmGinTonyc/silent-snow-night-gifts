@@ -85,12 +85,12 @@ func show_title(title: String, sub: String) -> void:
 
 
 func show_summary(l: Dictionary, balance: int, n: int, total: int) -> void:
-	summary_title.text = "Ночь %d из %d позади" % [n, total]
+	summary_title.text = "Night %d of %d is over" % [n, total]
 	var net: int = l["net"]
 	var sign_net := "+" if net >= 0 else "−"
-	summary_text.text = "Выручка за подарки: +%d\nРасходы: −%d\n   бумага %d · смятая %d · скотч %d · ленты %d · коробки %d\nЧаевые из банка: +%d\nИтог вечера: %s%d\nВ кассе: %d" % [
+	summary_text.text = "Gift sales: +%d\nExpenses: −%d\n   paper %d · wasted %d · tape %d · ribbon %d · boxes %d · stock %d\nTips from the jar: +%d\nTonight: %s%d\nIn the till: %d" % [
 		int(l["revenue"]), int(l["expenses"]), int(l["paper"]), int(l["waste"]), int(l["tape"]),
-		int(l["ribbon"]), int(l["box"]), int(l["tips"]), sign_net, absi(net), balance]
+		int(l["ribbon"]), int(l["box"]), int(l["stock"]), int(l["tips"]), sign_net, absi(net), balance]
 	summary_root.visible = true
 
 
@@ -106,7 +106,7 @@ func back_to_summary() -> void:
 
 
 func refresh_shop(items: Array, balance: int) -> void:
-	shop_balance.text = "В кассе: %d" % balance
+	shop_balance.text = "In the till: %d" % balance
 	for c in shop_cards:
 		c.queue_free()
 	shop_cards = []
@@ -117,12 +117,12 @@ func refresh_shop(items: Array, balance: int) -> void:
 		var card := _make_panel(Vector2(150.0 + float(col) * 495.0, 122.0 + float(row) * 80.0), Vector2(470, 72), Color(0.17, 0.12, 0.14, 0.95), 2, 12)
 		var nm: String = it["name"]
 		card.add_child(_make_label(nm, 21, Color(1.0, 0.93, 0.75), Vector2(14, 6), Vector2(330, 28), HORIZONTAL_ALIGNMENT_LEFT))
-		var tag := "Цена: %d" % int(it["price"])
+		var tag := "Price: %d" % int(it["price"])
 		if bool(it["premium"]):
-			tag += "  ·  премиум"
+			tag += "  ·  premium"
 		card.add_child(_make_label(tag, 14, Color(0.95, 0.8, 0.5), Vector2(14, 38), Vector2(340, 24), HORIZONTAL_ALIGNMENT_LEFT))
 		var owned: bool = it["owned"]
-		var btn := _make_button("Куплено" if owned else "Купить", Vector2(350, 12), Vector2(106, 46))
+		var btn := _make_button("Bought" if owned else "Buy", Vector2(350, 12), Vector2(106, 46))
 		btn.add_theme_font_size_override("font_size", 20)
 		if owned or int(it["price"]) > balance:
 			btn.disabled = true
@@ -143,7 +143,7 @@ func show_shop_note(text: String) -> void:
 
 
 func show_final(balance: int, tips_total: int) -> void:
-	final_text.text = "В кассе: %d\nВсего чаевых: %d\nЛавка исчезнет до утра. Спасибо за эту ночь." % [balance, tips_total]
+	final_text.text = "In the till: %d\nTotal tips: %d\nThe shop will vanish before dawn. Thanks for the night." % [balance, tips_total]
 	final_root.visible = true
 
 
@@ -228,9 +228,9 @@ func _build_start() -> void:
 	add_child(start_root)
 	start_root.add_child(_make_label("Silent Snow", 86, Color(1.0, 0.93, 0.75), Vector2(240, 120), Vector2(800, 100)))
 	start_root.add_child(_make_label("Night Gifts", 86, Color(1.0, 0.82, 0.45), Vector2(240, 212), Vector2(800, 100)))
-	start_root.add_child(_make_label("частная лавка рождественских эльфов · работаем только по ночам", 22, Color(0.85, 0.8, 0.95), Vector2(140, 336), Vector2(1000, 34)))
-	start_root.add_child(_make_label("Мы появляемся там, где подарок нужен срочно.", 20, Color(0.75, 0.72, 0.85), Vector2(240, 372), Vector2(800, 30)))
-	var prompt := _make_label("Нажми, чтобы начать", 28, Color(1.0, 0.85, 0.5), Vector2(240, 460), Vector2(800, 40))
+	start_root.add_child(_make_label("a private Christmas elf gift shop · open only at night", 22, Color(0.85, 0.8, 0.95), Vector2(140, 336), Vector2(1000, 34)))
+	start_root.add_child(_make_label("We appear wherever a gift is needed right now.", 20, Color(0.75, 0.72, 0.85), Vector2(240, 372), Vector2(800, 30)))
+	var prompt := _make_label("Click to start", 28, Color(1.0, 0.85, 0.5), Vector2(240, 460), Vector2(800, 40))
 	start_root.add_child(prompt)
 	var tw := create_tween().set_loops()
 	tw.tween_property(prompt, "modulate:a", 0.35, 0.9)
@@ -252,10 +252,10 @@ func _build_summary() -> void:
 	summary_root.add_child(summary_title)
 	summary_text = _make_label("", 24, Color(1.0, 0.88, 0.6), Vector2(340, 190), Vector2(600, 300), HORIZONTAL_ALIGNMENT_LEFT)
 	summary_root.add_child(summary_text)
-	var shop_btn := _make_button("Развитие лавки", Vector2(330, 540), Vector2(290, 54))
+	var shop_btn := _make_button("Grow the shop", Vector2(330, 540), Vector2(290, 54))
 	shop_btn.pressed.connect(_on_shop_open)
 	summary_root.add_child(shop_btn)
-	var next_btn := _make_button("Дальше", Vector2(680, 540), Vector2(240, 54))
+	var next_btn := _make_button("Next", Vector2(680, 540), Vector2(240, 54))
 	next_btn.pressed.connect(_on_next)
 	summary_root.add_child(next_btn)
 
@@ -277,15 +277,15 @@ func _build_shop() -> void:
 	var panel := _make_panel(Vector2(120, 30), Vector2(1040, 660))
 	shop_root.add_child(panel)
 	# все дочерние элементы лавки кладём в shop_root, поэтому координаты — от его угла
-	shop_root.add_child(_make_label("Развитие лавки", 36, Color(1.0, 0.93, 0.75), Vector2(160, 40), Vector2(500, 50), HORIZONTAL_ALIGNMENT_LEFT))
-	shop_root.add_child(_make_label("Эльфы-ИП вкладывают ночную выручку в лавку.", 16, Color(0.85, 0.75, 0.6), Vector2(160, 88), Vector2(600, 24), HORIZONTAL_ALIGNMENT_LEFT))
+	shop_root.add_child(_make_label("Grow the shop", 36, Color(1.0, 0.93, 0.75), Vector2(160, 40), Vector2(500, 50), HORIZONTAL_ALIGNMENT_LEFT))
+	shop_root.add_child(_make_label("Elf entrepreneurs invest the night's earnings in the shop.", 16, Color(0.85, 0.75, 0.6), Vector2(160, 88), Vector2(600, 24), HORIZONTAL_ALIGNMENT_LEFT))
 	shop_balance = _make_label("", 28, Color(1.0, 0.88, 0.5), Vector2(780, 50), Vector2(340, 40), HORIZONTAL_ALIGNMENT_RIGHT)
 	shop_root.add_child(shop_balance)
-	shop_root.add_child(_make_label("Премиум-материалы дороже в расходе, но повышают оценку подарка.", 16, Color(0.85, 0.75, 0.6), Vector2(150, 596), Vector2(700, 24), HORIZONTAL_ALIGNMENT_LEFT))
+	shop_root.add_child(_make_label("Premium materials cost more per use but raise the gift's rating.", 16, Color(0.85, 0.75, 0.6), Vector2(150, 596), Vector2(700, 24), HORIZONTAL_ALIGNMENT_LEFT))
 	shop_note = _make_label("", 20, Color(1.0, 0.7, 0.55), Vector2(160, 640), Vector2(400, 30), HORIZONTAL_ALIGNMENT_LEFT)
 	shop_note.modulate.a = 0.0
 	shop_root.add_child(shop_note)
-	var back := _make_button("Назад", Vector2(540, 632), Vector2(200, 48))
+	var back := _make_button("Back", Vector2(540, 632), Vector2(200, 48))
 	back.pressed.connect(_on_shop_back)
 	shop_root.add_child(back)
 
@@ -304,10 +304,10 @@ func _build_final() -> void:
 	final_root.visible = false
 	add_child(final_root)
 	final_root.add_child(_make_panel(Vector2(360, 280), Vector2(560, 340)))
-	final_root.add_child(_make_label("С Новым годом!", 54, Color(1.0, 0.93, 0.75), Vector2(380, 306), Vector2(520, 70)))
+	final_root.add_child(_make_label("Happy New Year!", 54, Color(1.0, 0.93, 0.75), Vector2(380, 306), Vector2(520, 70)))
 	final_text = _make_label("", 24, Color(1.0, 0.88, 0.6), Vector2(380, 396), Vector2(520, 110))
 	final_root.add_child(final_text)
-	var btn := _make_button("Сыграть ещё", Vector2(500, 530), Vector2(280, 54))
+	var btn := _make_button("Play again", Vector2(500, 530), Vector2(280, 54))
 	btn.pressed.connect(_on_restart)
 	final_root.add_child(btn)
 

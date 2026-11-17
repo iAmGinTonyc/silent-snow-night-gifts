@@ -152,7 +152,10 @@ func _draw() -> void:
 	_arm(Vector2(-56, 250), lhand, Vector2(-34, 0), coat.darkened(0.1))
 	_arm(Vector2(56, 250), rhand, rbend, coat.darkened(0.1))
 
-	# голова
+	# голова (платок надевается под лицо)
+	if hat == "hijab":
+		_blob(Vector2(0, 174), 48.0, 52.0, hatc, 3.0)
+		_poly(PackedVector2Array([Vector2(-46, 192), Vector2(46, 192), Vector2(62, 252), Vector2(-62, 252)]), hatc, 3.0)
 	_blob(Vector2(-37, 172), 7.0, 8.0, skin.darkened(0.06), 2.5)
 	_blob(Vector2(37, 172), 7.0, 8.0, skin.darkened(0.06), 2.5)
 	_blob(Vector2(0, 170), 37.0, 39.0, skin)
@@ -164,7 +167,7 @@ func _draw() -> void:
 
 
 func _draw_hair_and_hat(hair: Color, hat: String, hatc: Color) -> void:
-	if hat != "santa" and hat != "beanie":
+	if hat != "santa" and hat != "beanie" and hat != "hijab" and hat != "ushanka":
 		var cap := PackedVector2Array()
 		for k in 17:
 			var a := PI + PI * float(k) / 16.0
@@ -196,6 +199,20 @@ func _draw_hair_and_hat(hair: Color, hat: String, hatc: Color) -> void:
 			_poly(U.rect_pts(Rect2(-2, 150, 52, 8)), hatc.darkened(0.2), 2.5)
 		"bun":
 			_blob(Vector2(0, 126), 15.0, 15.0, hair, 2.5)
+		"ushanka":
+			var domeu := PackedVector2Array()
+			for k in 17:
+				var au := PI + PI * float(k) / 16.0
+				domeu.append(Vector2(cos(au) * 43.0, 156 + sin(au) * 36.0))
+			_poly(domeu, hatc)
+			_poly(U.rect_pts(Rect2(-44, 148, 88, 14)), Color(0.92, 0.9, 0.86), 2.5)
+			_poly(U.rect_pts(Rect2(-47, 150, 12, 38)), hatc.darkened(0.1), 2.5)
+			_poly(U.rect_pts(Rect2(35, 150, 12, 38)), hatc.darkened(0.1), 2.5)
+		"beret":
+			_poly(U.ellipse(Vector2(6, 142), 42.0, 15.0, -0.12, 24), hatc)
+			_blob(Vector2(8, 128), 4.0, 5.0, hatc.darkened(0.2), 2.0)
+		"hijab":
+			draw_arc(Vector2(0, 172), 40.0, PI * 1.02, PI * 1.98, 20, hatc.darkened(0.3), 6.0)
 
 
 func _draw_face() -> void:

@@ -60,4 +60,21 @@ static func _build(kind: String) -> PackedVector2Array:
 				U.ellipse(Vector2(-10, 0), 52.0, 52.0, 0.0, 40),
 				U.ellipse(Vector2(52, 0), 22.0, 26.0, 0.0, 24),
 			])
+		"ornament":
+			return _union([
+				U.ellipse(Vector2(0, 6), 55.0, 55.0, 0.0, 40),
+				U.rect_pts(Rect2(-13.0, -62.0, 26.0, 20.0)),
+			])
+		"train":
+			var parts: Array = [
+				U.rect_pts(Rect2(-115.0, -26.0, 100.0, 52.0)),
+				U.rect_pts(Rect2(-16.0, -5.0, 26.0, 10.0)),
+				U.rect_pts(Rect2(8.0, -27.0, 100.0, 54.0)),
+				U.ellipse(Vector2(108, 0), 10.0, 27.0, 0.0, 16),
+			]
+			for wx in [-100.0, -52.0, 20.0, 70.0]:
+				var x: float = wx
+				parts.append(U.rect_pts(Rect2(x, -32.0, 18.0, 8.0)))
+				parts.append(U.rect_pts(Rect2(x, 24.0, 18.0, 8.0)))
+			return _union(parts)
 	return PackedVector2Array()

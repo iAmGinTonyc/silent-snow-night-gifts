@@ -4,16 +4,21 @@ extends Node2D
 
 signal accept_pressed
 signal item_given
+signal offer_pressed(item_id: String)
 
 const Data = preload("res://scripts/data.gd")
 const U = preload("res://scripts/util.gd")
 const Shapes = preload("res://scripts/shapes.gd")
+const ItemArt = preload("res://scripts/item_art.gd")
 
 const COUNTER_Y := 540.0
 const CUSTOMER_HAND := Vector2(470, 470)
 const JAR_POS := Vector2(1205, 500)
 const REG_POS := Vector2(130, 500)
-const CAT_POS := Vector2(840, 520)
+const CAT_POS := Vector2(1000, 520)
+const SHELF_X0 := 550.0
+const SHELF_DX := 114.0
+const SHELF_FIT := 86.0
 const ACCEPT_RECT := Rect2(490, 598, 300, 66)
 const CUSTOMER_RECT := Rect2(280, 120, 240, 420)
 const GIFT_POS := Vector2(640, 510)
@@ -31,6 +36,10 @@ var accept_enabled := false
 var accept_t := 0.0
 var hover_accept := false
 var bubble_text := ""
+var bubble_kind := "speech"   # speech или thought (мысли клиента)
+var offer_enabled := false
+var shelf_hover := -1
+var thought_style: StyleBoxFlat
 var bubble_name := ""
 var bubble_t := 1.0
 var tips_shown := 0
@@ -57,6 +66,13 @@ func _ready() -> void:
 	bubble_style.set_corner_radius_all(26)
 	bubble_style.shadow_color = Color(0, 0, 0, 0.3)
 	bubble_style.shadow_size = 8
+	thought_style = StyleBoxFlat.new()
+	thought_style.bg_color = Color(0.91, 0.94, 1.0)
+	thought_style.border_color = U.INK
+	thought_style.set_border_width_all(4)
+	thought_style.set_corner_radius_all(44)
+	thought_style.shadow_color = Color(0, 0, 0, 0.3)
+	thought_style.shadow_size = 8
 	button_style = StyleBoxFlat.new()
 	button_style.bg_color = Color("#f0c05a")
 	button_style.border_color = U.INK
@@ -73,7 +89,21 @@ func _ready() -> void:
 
 # --- Публичное API -----------------------------------------------------------
 
+## Мысли клиента: мы читаем их и подбираем подарок с полки.
+func show_thought(person: String, text: String) -> void:
+	bubble_kind = "thought"
+	bubble_name = "Thoughts: " + person
+	bubble_text = text
+	bubble_t = 0.0
+
+
+func set_offer(on: bool) -> void:
+	offer_enabled = on
+	shelf_hover = -1
+
+
 func show_bubble(person: String, text: String) -> void:
+	bubble_kind = "speech"
 	bubble_name = person
 	bubble_text = text
 	bubble_t = 0.0
@@ -131,6 +161,7 @@ func clear_gift() -> void:
 
 func reset() -> void:
 	bubble_text = ""
+	offer_enabled = false
 	accept_enabled = false
 	give = {}
 	gift_look = {}
@@ -147,13 +178,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		var p := get_global_mouse_position()
 		hover_accept = accept_enabled and (ACCEPT_RECT.has_point(p) or CUSTOMER_RECT.has_point(p))
 		var over_cat := p.distance_to(CAT_POS + Vector2(-5, 0)) < 50.0
-		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (hover_accept or over_cat) else Input.CURSOR_ARROW)
+		shelf_hover = _shelf_at(p) if offer_enabled else -1
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (hover_accept or over_cat or shelf_hover >= 0) else Input.CURSOR_ARROW)
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
 			var p2 := get_global_mouse_position()
 			if p2.distance_to(CAT_POS + Vector2(-5, 0)) < 50.0:
 				_pet_cat()
+			elif offer_enabled and _shelf_at(p2) >= 0:
+				AudioSynth.play_sfx("click")
+				offer_pressed.emit(str(Data.STOCK[_shelf_at(p2)]))
 			elif accept_enabled and (ACCEPT_RECT.has_point(p2) or CUSTOMER_RECT.has_point(p2)):
 				accept_enabled = false
 				hover_accept = false
@@ -211,6 +246,7 @@ func _draw() -> void:
 	_draw_counter()
 	_draw_register()
 	_draw_jar()
+	_draw_shelf()
 	_draw_cat()
 	_draw_gift()
 	_draw_give()
@@ -257,7 +293,7 @@ func _draw_jar() -> void:
 		draw_circle(p + Vector2(-1.5, -0.8), 1.1, Color(1, 0.95, 0.6, 0.8))
 	draw_style_box(jar_style, Rect2(c.x - 36.0, c.y - 40.0, 72.0, 84.0))
 	U.fill_stroke(self, U.rect_pts(Rect2(c.x - 40.0, c.y - 52.0, 80.0, 14.0)), Color("#c0392b"), 3.0, time)
-	draw_string(font, Vector2(c.x - 40.0, c.y + 68.0), "Чаевые: " + str(tips_shown), HORIZONTAL_ALIGNMENT_CENTER, 80.0, 15, Color(1, 0.93, 0.7))
+	draw_string(font, Vector2(c.x - 40.0, c.y + 68.0), "Tips: " + str(tips_shown), HORIZONTAL_ALIGNMENT_CENTER, 80.0, 15, Color(1, 0.93, 0.7))
 
 
 func _draw_cat() -> void:
@@ -319,7 +355,7 @@ func _draw_accept() -> void:
 	var c := ACCEPT_RECT.get_center()
 	draw_set_transform(c * (1.0 - s), 0.0, Vector2(s, s))
 	draw_style_box(button_style, ACCEPT_RECT)
-	draw_string(font, Vector2(ACCEPT_RECT.position.x, c.y + 11.0), "Принять заказ", HORIZONTAL_ALIGNMENT_CENTER, ACCEPT_RECT.size.x, 30, U.INK)
+	draw_string(font, Vector2(ACCEPT_RECT.position.x, c.y + 11.0), "Take the order", HORIZONTAL_ALIGNMENT_CENTER, ACCEPT_RECT.size.x, 30, U.INK)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -332,12 +368,23 @@ func _draw_bubble() -> void:
 	var s := maxf(U.ease_out_elastic(bubble_t), 0.001)
 	var pivot := Vector2(rect.position.x, rect.end.y)
 	draw_set_transform(pivot * (1.0 - s), 0.0, Vector2(s, s))
-	draw_style_box(bubble_style, rect)
-	var tail := PackedVector2Array([Vector2(rect.position.x + 20.0, rect.end.y - 64.0), Vector2(rect.position.x + 20.0, rect.end.y - 14.0), Vector2(478, 290)])
-	draw_colored_polygon(tail, BUBBLE_COLOR)
-	draw_polyline(PackedVector2Array([tail[0], tail[2], tail[1]]), U.INK, 4.0, true)
-	draw_rect(Rect2(rect.position.x + 17.0, rect.end.y - 62.0, 6.0, 46.0), BUBBLE_COLOR)
-	draw_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 34.0), bubble_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.62, 0.38, 0.26))
+	if bubble_kind == "thought":
+		draw_style_box(thought_style, rect)
+		var puffs := [Vector2(rect.position.x + 26.0, rect.end.y + 18.0), Vector2(rect.position.x - 6.0, rect.end.y + 42.0), Vector2(rect.position.x - 30.0, rect.end.y + 62.0)]
+		var radii := [13.0, 9.0, 6.0]
+		for k in 3:
+			var pc: Vector2 = puffs[k]
+			U.fill_stroke(self, U.ellipse(pc, float(radii[k]), float(radii[k]), 0.0, 16), Color(0.91, 0.94, 1.0), 3.0, time)
+		for k in 4:
+			var sp := Vector2(rect.position.x + 40.0 + float(k) * (rect.size.x - 80.0) / 3.0, rect.position.y - 8.0 + 4.0 * sin(time * 3.0 + float(k)))
+			draw_colored_polygon(U.star(sp, 7.0, 2.6, 4, time + float(k)), Color(0.7, 0.8, 1.0, 0.6 + 0.4 * sin(time * 4.0 + float(k))))
+	else:
+		draw_style_box(bubble_style, rect)
+		var tail := PackedVector2Array([Vector2(rect.position.x + 20.0, rect.end.y - 64.0), Vector2(rect.position.x + 20.0, rect.end.y - 14.0), Vector2(478, 290)])
+		draw_colored_polygon(tail, BUBBLE_COLOR)
+		draw_polyline(PackedVector2Array([tail[0], tail[2], tail[1]]), U.INK, 4.0, true)
+		draw_rect(Rect2(rect.position.x + 17.0, rect.end.y - 62.0, 6.0, 46.0), BUBBLE_COLOR)
+	draw_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 34.0), bubble_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.62, 0.38, 0.26) if bubble_kind == "speech" else Color(0.32, 0.4, 0.62))
 	draw_multiline_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 44.0 + font.get_ascent(28)), bubble_text,
 		HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 56.0, 28, -1, U.INK)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -365,7 +412,7 @@ func _draw_give() -> void:
 		U.fill_stroke(self, U.rect_pts(Rect2(-w * 0.5, -h * 0.5, w, h)), col, 5.0, time)
 		draw_rect(Rect2(-9.0, -h * 0.5, 18.0, h), Color("#dccfab"))
 	else:
-		U.fill_stroke(self, Shapes.silhouette(kind), col, 5.0, time)
+		ItemArt.draw(self, kind, it, time)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -418,3 +465,52 @@ func _draw_gift() -> void:
 			draw_line(b2 + pp2 * -22.0, b2 + pp2 * 22.0, ribbon_col, 9.0)
 			U.draw_bow(self, b2 + d2 * 6.0, bow * 0.8, ribbon_col, time)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+# --- Полка «в наличии» ----------------------------------------------------------
+
+func _shelf_scale(i: int) -> float:
+	var it: Dictionary = Data.ITEMS[str(Data.STOCK[i])]
+	var fit := SHELF_FIT * (1.3 if str(it["kind"]) == "train" else 1.0)
+	return fit / maxf(float(it["w"]), float(it["h"]))
+
+
+func _shelf_rect(i: int) -> Rect2:
+	var x := SHELF_X0 + float(i) * SHELF_DX
+	return Rect2(x - 52.0, COUNTER_Y - 104.0, 104.0, 108.0)
+
+
+func _shelf_at(p: Vector2) -> int:
+	for i in Data.STOCK.size():
+		if _shelf_rect(i).has_point(p):
+			return i
+	return -1
+
+
+func _draw_shelf() -> void:
+	# табличка и деревянная подставка
+	var x0 := SHELF_X0 - 62.0
+	var x1 := SHELF_X0 + float(Data.STOCK.size() - 1) * SHELF_DX + 62.0
+	draw_rect(Rect2(x0, COUNTER_Y - 6.0, x1 - x0, 8.0), Color("#a87c52"))
+	U.stroke(self, U.rect_pts(Rect2(x0, COUNTER_Y - 6.0, x1 - x0, 8.0)), U.INK, 3.0, time, 1.0)
+	draw_string(font, Vector2(x0, COUNTER_Y + 22.0), "In stock", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1, 0.93, 0.75, 0.8))
+	for i in Data.STOCK.size():
+		var id := str(Data.STOCK[i])
+		var it: Dictionary = Data.ITEMS[id]
+		var kind: String = it["kind"]
+		var sc := _shelf_scale(i)
+		var hov := (i == shelf_hover)
+		var hint := 0.0
+		if offer_enabled:
+			hint = 0.5 + 0.5 * sin(time * 4.0 + float(i))
+		var s := sc * (1.14 if hov else 1.0 + 0.03 * hint)
+		var x := SHELF_X0 + float(i) * SHELF_DX
+		var half_h := float(it["h"]) * 0.5 * s
+		if hov:
+			draw_circle(Vector2(x, COUNTER_Y - 6.0 - half_h), 56.0, Color(1.0, 0.92, 0.55, 0.22))
+		draw_set_transform(Vector2(x, COUNTER_Y - 8.0 - half_h), 0.0, Vector2(s, s))
+		ItemArt.draw(self, kind, it, time)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		if hov:
+			var nm: String = it["name"]
+			draw_string(font, Vector2(x - 60.0, COUNTER_Y - 112.0), nm, HORIZONTAL_ALIGNMENT_CENTER, 120.0, 15, Color(1, 0.96, 0.85, 0.95))
