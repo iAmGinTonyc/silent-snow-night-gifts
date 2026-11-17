@@ -107,6 +107,7 @@ func _process(delta: float) -> void:
 		return
 	patience -= delta
 	status.set_patience(patience / patience_max, patience)
+	customer.set_worry(patience / patience_max)
 	if patience <= 0.0:
 		patience_on = false
 		_on_timeout()

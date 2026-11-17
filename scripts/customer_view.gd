@@ -11,6 +11,23 @@ const HOME_X := 400.0
 const ENTER_FROM := 620.0
 const FEET_Y := 337.0
 
+## Клиенты с нарисованными кадрами (7 кадров от тревоги до смеха): имя в данных -> имя файлов.
+## Остальные клиенты пока рисуются кодом, пока для них нет кадров.
+const SPRITE_IDS := {
+	"Mrs. Tanaka": "tanaka", "Mateo": "mateo", "Ingrid": "ingrid",
+	"Mr. Okafor": "okafor", "Granny Zeynep": "zeynep",
+}
+const SPRITE_H := 224.0       # высота спрайта в единицах узла (узел ещё масштабируется)
+const SPRITE_BASE_Y := 350.0  # нижний срез спрайта прячется за прилавком
+const FACE_FPS := 14.0        # сколько кадров лица в секунду проходит анимация
+
+static var _sprite_cache := {}
+
+var sprite: Array = []        # 7 текстур или пусто
+var face := 2.0               # какой кадр сейчас показан (дробный, плавно идёт к цели)
+var reacted := false          # клиент уже отреагировал на результат
+var worry := 1.0              # доля оставшегося терпения 0..1
+
 var data: Dictionary = {}
 var mood := 1
 var state := "none"   # none, entering, idle, leaving
@@ -35,12 +52,54 @@ func arrive(c: Dictionary) -> void:
 	x_off = ENTER_FROM
 	react_t = 99.0
 	sparkle_t = 99.0
+	reacted = false
+	worry = 1.0
+	face = 2.0
+	sprite = _load_sprite(str(c.get("name", "")))
 
 
 func set_mood(m: int) -> void:
 	mood = m
+	reacted = true
 	react_t = 0.0
 	sparkle_t = 0.0
+
+
+## Сколько терпения осталось (0..1): чем меньше, тем тревожнее лицо у клиента с кадрами.
+func set_worry(frac: float) -> void:
+	worry = clampf(frac, 0.0, 1.0)
+
+
+func _load_sprite(cname: String) -> Array:
+	if not SPRITE_IDS.has(cname):
+		return []
+	var id: String = SPRITE_IDS[cname]
+	if _sprite_cache.has(id):
+		return _sprite_cache[id]
+	var frames: Array = []
+	for i in 7:
+		var path := "res://art/customers/%s_%d.png" % [id, i]
+		if not ResourceLoader.exists(path):
+			frames = []
+			break
+		frames.append(load(path))
+	_sprite_cache[id] = frames
+	return frames
+
+
+## Какой кадр лица нужен сейчас: после реакции по результату, иначе по оставшемуся терпению.
+func _face_target() -> int:
+	if reacted:
+		if mood >= 2:
+			return 6
+		if mood == 1:
+			return 4
+		return 0
+	if worry > 0.6:
+		return 2
+	if worry > 0.3:
+		return 1
+	return 0
 
 
 func leave() -> void:
@@ -50,6 +109,8 @@ func leave() -> void:
 
 func reset() -> void:
 	data = {}
+	sprite = []
+	reacted = false
 	state = "none"
 	x_off = ENTER_FROM
 	position = Vector2(HOME_X + ENTER_FROM, 0)
@@ -64,6 +125,8 @@ func _process(delta: float) -> void:
 		blinking = 0.12
 		blink_in = randf_range(2.5, 5.0)
 	blinking = maxf(blinking - delta, 0.0)
+	if not sprite.is_empty():
+		face = move_toward(face, float(_face_target()), FACE_FPS * delta)
 	if state == "entering":
 		t_state += delta / 1.1
 		x_off = ENTER_FROM * (1.0 - U.ease_out_back(minf(t_state, 1.0)))
@@ -127,6 +190,15 @@ func _draw() -> void:
 	elif mood == 0 and react_t < 0.8:
 		sx += sin(react_t * 40.0) * 0.015 * (1.0 - react_t / 0.8)
 	draw_set_transform(Vector2(0.0, FEET_Y * (1.0 - sy) + jump), 0.0, Vector2(sx, sy))
+
+	# клиент с нарисованными кадрами: спрайт вместо кода, лицо плавно идёт по 7 кадрам
+	if not sprite.is_empty():
+		var tex: Texture2D = sprite[clampi(int(roundf(face)), 0, 6)]
+		var k := SPRITE_H / float(tex.get_height())
+		var sz := Vector2(tex.get_width(), tex.get_height()) * k
+		draw_texture_rect(tex, Rect2(Vector2(-sz.x * 0.5, SPRITE_BASE_Y - sz.y), sz), false)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
 
 	# туловище
 	var body := PackedVector2Array([
