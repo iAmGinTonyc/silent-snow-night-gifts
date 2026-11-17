@@ -220,11 +220,11 @@ func _set_axis(a: String) -> void:
 		return
 	axis = a
 	rot = 0.0 if a == "h" else PI * 0.5
-	pull_len = MIN_SHEET
+	pull_len = _pull_min()
 	sheet_len = pull_len
 	pull_moved = false
 	AudioSynth.play_sfx("click")
-	_hint("Drag the loose end to unroll the paper, then take the scissors and cut near the roll")
+	_hint("Drag the loose end: the gift stays in the middle of the sheet and the roll rolls away. Then cut with the scissors")
 
 
 func _set_paper_transform() -> void:
@@ -233,16 +233,16 @@ func _set_paper_transform() -> void:
 	draw_set_transform(CENTER + gift_off + off, rot, Vector2(s, s))
 
 
-## Где начинается лист (кромка рулона) вдоль оси вытяжки. Рулон стоит у края стола, подарок в центре.
-func _u_start() -> float:
-	var half := (MAT_RECT.size.x if axis == "h" else MAT_RECT.size.y) * 0.5
-	return -half + 56.0
+## Самый короткий лист при вытяжке: чуть шире подарка, чтобы был виден свободный конец.
+func _pull_min() -> float:
+	return _along() + 56.0
 
 
-## Сколько бумаги можно вытянуть: не больше нужного и не дальше края стола.
+## Сколько бумаги можно вытянуть: лист всегда по центру подарка, рулон отъезжает к краю стола,
+## поэтому длина ограничена шириной (или высотой) стола минус место под рулон.
 func _pull_max() -> float:
 	var half := (MAT_RECT.size.x if axis == "h" else MAT_RECT.size.y) * 0.5
-	return minf(_l_max(), half - 14.0 - _u_start())
+	return maxf(_pull_min(), 2.0 * (half - 58.0))
 
 
 func _hint(text: String) -> void:
@@ -918,23 +918,23 @@ func _on_release() -> void:
 
 func _select_paper(slot: int) -> void:
 	paper_idx = int(inv_papers[slot])
-	pull_len = MIN_SHEET
+	pull_len = _pull_min()
 	sheet_len = pull_len
 	pulling = false
 	pull_moved = false
 	paper_shift = 0.0
 	step = Step.PULL
 	AudioSynth.play_sfx("paper_pull")
-	_hint("Choose the direction, then drag the loose end to unroll the paper. Take the scissors and cut near the roll")
+	_hint("Choose the direction, then drag the loose end: the gift stays in the middle and the roll rolls away. Then cut with the scissors")
 
 
-## Тянем свободный конец: лист раскручивается с рулона только в одну сторону.
+## Тянем свободный конец вправо: лист остаётся по центру подарка, рулон отъезжает влево.
 func _update_pull(pos: Vector2) -> void:
 	if not pull_moved and pos.distance_to(pull_press) < 6.0:
 		return
 	pull_moved = true
 	var lp := _to_paper(pos - CENTER)
-	pull_len = clampf(lp.x - _u_start(), MIN_SHEET, _pull_max())
+	pull_len = clampf(2.0 * lp.x, _pull_min(), _pull_max())
 	sheet_len = pull_len
 	if absf(pull_len - last_pull_len) > 60.0:
 		last_pull_len = pull_len
@@ -951,8 +951,8 @@ func _finish_pull() -> void:
 ## Ножницы отрезают кусок от свободного конца. Длина куска = от линии реза до конца листа.
 func _do_cut(pos: Vector2) -> void:
 	var lp := _to_paper(pos - CENTER)
-	var u1 := _u_start() + pull_len
-	var u_c := clampf(lp.x, _u_start() + 6.0, u1 - MIN_SHEET)
+	var u1 := pull_len * 0.5
+	var u_c := clampf(lp.x, -u1 + 6.0, u1 - MIN_SHEET)
 	var cut_len := u1 - u_c
 	sheet_len = cut_len
 	paper_shift = (u_c + u1) * 0.5
@@ -1342,8 +1342,8 @@ func _draw_cut_preview() -> void:
 	if step != Step.PULL or active_tool != "scissors" or not MAT_RECT.has_point(mouse_pos):
 		return
 	var lp := _to_paper(mouse_pos - CENTER)
-	var u1 := _u_start() + pull_len
-	var u_c := clampf(lp.x, _u_start() + 6.0, u1 - MIN_SHEET)
+	var u1 := pull_len * 0.5
+	var u_c := clampf(lp.x, -u1 + 6.0, u1 - MIN_SHEET)
 	var hh := _across() * 0.5 + MARGIN + 12.0
 	_set_paper_transform()
 	draw_dashed_line(Vector2(u_c, -hh), Vector2(u_c, hh), Color(1.0, 0.45, 0.4, 0.95), 3.0, 8.0)
@@ -1351,10 +1351,11 @@ func _draw_cut_preview() -> void:
 	draw_string(font, mouse_pos + Vector2(18, -14), "Cut length: %d" % int(u1 - u_c), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.8, 0.75))
 
 
-## Вид во время вытяжки: рулон у края стола, лист раскручивается к подарку, который остаётся в центре.
+## Вид во время вытяжки: лист по центру подарка, свободный конец идёт за курсором,
+## рулон откатывается в другую сторону и становится тоньше.
 func _draw_pull_view(paper: Dictionary, ir: Rect2) -> void:
-	var u0 := _u_start()
-	var u1 := u0 + pull_len
+	var u0 := -pull_len * 0.5
+	var u1 := pull_len * 0.5
 	var half_v := _across() * 0.5 + MARGIN
 	var pbase := Color.html(paper["base"])
 	var back := Color("#efe3c8").lerp(pbase, 0.16)
@@ -1366,26 +1367,38 @@ func _draw_pull_view(paper: Dictionary, ir: Rect2) -> void:
 	draw_rect(Rect2(u0, half_v - 5.0, pull_len, 5.0), pbase)
 	draw_rect(Rect2(u1 - 9.0, -half_v, 9.0, half_v * 2.0), back.darkened(0.1))
 	_rect_stroke(sr, 3.0)
-	_draw_roll_on_table(paper, u0, half_v)
+	var prog := clampf(inverse_lerp(_pull_min(), _pull_max(), pull_len), 0.0, 1.0)
+	_draw_roll_on_table(paper, u0, half_v, lerpf(52.0, 30.0, prog))
 	_set_gift_transform()
 	_draw_subject(ir)
 
 
-## Рулон лежит на столе: цилиндр вдоль поперечной оси, с узором, картонной гильзой и подкручивающимся краем.
-func _draw_roll_on_table(paper: Dictionary, u0: float, half_v: float) -> void:
-	var r := Rect2(u0 - 50.0, -half_v - 8.0, 52.0, half_v * 2.0 + 16.0)
+## Рулон лежит на столе, вид строго сверху: сбоку виден цилиндр (прямоугольник с цилиндрической светотенью),
+## концы картонной гильзы торчат с двух сторон. rt: толщина рулона вдоль вытяжки, он худеет по мере разворота;
+## швы слоёв бегут по поверхности, пока рулон откатывается.
+func _draw_roll_on_table(paper: Dictionary, u0: float, half_v: float, rt: float) -> void:
+	var r := Rect2(u0 - rt, -half_v, rt + 2.0, half_v * 2.0)
+	var cx := r.position.x + r.size.x * 0.5
+	var rad := maxf(rt * 0.5, 1.0)
+	var tube := Rect2(cx - rt * 0.24, r.position.y - 10.0, rt * 0.48, r.size.y + 20.0)
 	draw_rect(Rect2(r.position + Vector2(5, 6), r.size), Color(0, 0, 0, 0.28))
+	draw_rect(tube, Color("#d9c7a0"))
+	_rect_stroke(tube, 2.5)
 	_draw_print(r, paper, r.position.x, 1.0, PackedVector2Array())
-	draw_rect(Rect2(r.position.x, r.position.y, 12.0, r.size.y), Color(1, 1, 1, 0.16))
-	draw_rect(Rect2(r.end.x - 14.0, r.position.y, 14.0, r.size.y), Color(0, 0, 0, 0.24))
-	for k in 4:
-		draw_line(Vector2(r.position.x + 14.0 + float(k) * 9.0, r.position.y), Vector2(r.position.x + 14.0 + float(k) * 9.0, r.end.y), Color(0, 0, 0, 0.12), 1.5)
+	draw_rect(Rect2(r.position.x, r.position.y, rt * 0.24, r.size.y), Color(0, 0, 0, 0.22))
+	draw_rect(Rect2(r.position.x + rt * 0.30, r.position.y, rt * 0.14, r.size.y), Color(1, 1, 1, 0.20))
+	draw_rect(Rect2(r.end.x - rt * 0.30, r.position.y, rt * 0.30, r.size.y), Color(0, 0, 0, 0.30))
+	var ang0 := -pull_len * 0.5 / rad
+	for k in 5:
+		var a := TAU * float(k) / 5.0 + ang0
+		var c := cos(a)
+		if c > 0.1:
+			var lx := cx + rad * sin(a)
+			draw_line(Vector2(lx, r.position.y), Vector2(lx, r.end.y), Color(0, 0, 0, 0.18 * c), 1.5)
 	_rect_stroke(r, 3.5)
-	for sg in [-1.0, 1.0]:
-		var sv: float = sg
-		var e := Vector2(r.position.x + r.size.x * 0.5, r.get_center().y + sv * (r.size.y * 0.5))
-		U.fill_stroke(self, U.ellipse(e, 26.0, 8.0), Color("#d9c7a0"), 3.0, time)
-		draw_colored_polygon(U.ellipse(e, 12.0, 3.5), Color("#6b5640"))
+	for sv in [-1.0, 1.0]:
+		var ey: float = r.position.y if sv < 0.0 else r.end.y
+		draw_line(Vector2(r.position.x, ey), Vector2(r.end.x, ey), U.INK, 3.0)
 
 
 func _draw_gift() -> void:
@@ -1551,7 +1564,7 @@ func _draw_gift() -> void:
 func _draw_gift_hints(hh: float, f: float) -> void:
 	var pulse := 0.5 + 0.5 * sin(time * 4.0)
 	if step == Step.PULL and paper_idx >= 0:
-		var u1 := _u_start() + pull_len
+		var u1 := pull_len * 0.5
 		var col := Color(1, 0.92, 0.6, 0.85)
 		var top := -hh - MARGIN - 10.0
 		var bot := hh + MARGIN + 10.0

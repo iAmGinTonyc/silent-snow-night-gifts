@@ -48,12 +48,12 @@ func wrap_gift(perfect: bool, vertical: bool) -> bool:
 	if vertical:
 		w._set_axis("v")
 	var along: float = w._along()
-	w.pull_len = clampf((w._l_min() + 60.0) if perfect else (along + 40.0), 60.0, w._pull_max())
+	w.pull_len = clampf((w._l_min() + 60.0) if perfect else (along + 40.0), w._pull_min(), w._pull_max())
 	w.sheet_len = w.pull_len
 	w.pull_moved = true
 	w._finish_pull()
 	w._select_tool("scissors")
-	w._do_cut(w.CENTER + Vector2(w._u_start() + 30.0, 0.0).rotated(w.rot))
+	w._do_cut(w.CENTER + Vector2(-w.pull_len * 0.5 + 30.0, 0.0).rotated(w.rot))
 	await create_timer(0.6).timeout
 	if w.step != w.Step.WRAP:
 		print("   cut failed, step=", w.step)

@@ -20,6 +20,8 @@ const SPRITE_IDS := {
 const SPRITE_H := 224.0       # высота спрайта в единицах узла (узел ещё масштабируется)
 const SPRITE_BASE_Y := 350.0  # нижний срез спрайта прячется за прилавком
 const FACE_FPS := 14.0        # сколько кадров лица в секунду проходит анимация
+const TWINKLE_MIN_MOOD := 2   # блестки только при отличном подарке
+const TWINKLES := 8           # сколько блесток одновременно мерцает у радостного клиента
 
 static var _sprite_cache := {}
 
@@ -189,16 +191,20 @@ func _draw() -> void:
 		jump -= absf(sin(react_t * 8.5)) * 30.0 * exp(-react_t * 2.2)
 	elif mood == 0 and react_t < 0.8:
 		sx += sin(react_t * 40.0) * 0.015 * (1.0 - react_t / 0.8)
-	draw_set_transform(Vector2(0.0, FEET_Y * (1.0 - sy) + jump), 0.0, Vector2(sx, sy))
 
-	# клиент с нарисованными кадрами: спрайт вместо кода, лицо плавно идёт по 7 кадрам
+	# клиент с нарисованными кадрами: спрайт вместо кода. Без прыжков и покачиваний, меняется только
+	# лицо (плавно идёт по 7 кадрам), а блестки радости появляются и гаснут
 	if not sprite.is_empty():
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		var tex: Texture2D = sprite[clampi(int(roundf(face)), 0, 6)]
 		var k := SPRITE_H / float(tex.get_height())
 		var sz := Vector2(tex.get_width(), tex.get_height()) * k
 		draw_texture_rect(tex, Rect2(Vector2(-sz.x * 0.5, SPRITE_BASE_Y - sz.y), sz), false)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		if reacted and mood >= TWINKLE_MIN_MOOD:
+			_draw_twinkles()
 		return
+
+	draw_set_transform(Vector2(0.0, FEET_Y * (1.0 - sy) + jump), 0.0, Vector2(sx, sy))
 
 	# туловище
 	var body := PackedVector2Array([
@@ -318,6 +324,33 @@ func _draw_face() -> void:
 				m.append(Vector2(cos(a) * 14.0, 184 + sin(a) * 12.0))
 			_poly(m, Color("#5a2330"), 2.5)
 			draw_colored_polygon(U.ellipse(Vector2(0, 191), 7.0, 4.0, 0.0, 14), Color("#e8808a"))
+
+
+## Блестки радости у клиента с кадрами: каждая появляется, вспыхивает и гаснет, а в следующий раз
+## возникает уже в другом месте вокруг головы. Положение берётся из номера вспышки, без хранения.
+func _draw_twinkles() -> void:
+	var intro := clampf(react_t / 0.35, 0.0, 1.0)
+	for i in TWINKLES:
+		var period := 0.8 + 0.11 * float(i)
+		var t := time + float(i) * 0.43
+		var cycle := floorf(t / period)
+		var ph := fposmod(t, period) / period
+		var env := sin(PI * ph)
+		env *= env
+		var h1 := fposmod(sin((cycle + float(i) * 7.0) * 12.9898) * 43758.5453, 1.0)
+		var h2 := fposmod(sin((cycle * 1.7 + float(i) * 3.0) * 78.233) * 12345.678, 1.0)
+		var a := TAU * (float(i) / float(TWINKLES) + 0.09 * h1)
+		var r := 88.0 + 46.0 * h2
+		var p := Vector2(cos(a) * r, 188.0 + sin(a) * r * 0.78)
+		if p.y > 285.0:
+			continue
+		var size := (6.0 + 9.0 * h1) * env * intro
+		if size < 0.8:
+			continue
+		var rot := a * 0.5 + ph * 1.2
+		var alpha := minf(1.0, env * 1.4) * intro
+		draw_colored_polygon(U.star(p, size, size * 0.3, 4, rot), Color(1.0, 0.95, 0.72, alpha))
+		draw_colored_polygon(U.star(p, size * 0.5, size * 0.18, 4, rot + PI * 0.25), Color(1.0, 1.0, 1.0, alpha * 0.8))
 
 
 func _draw_sparkles() -> void:
