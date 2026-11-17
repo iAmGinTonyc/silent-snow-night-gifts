@@ -101,7 +101,13 @@ func _ready() -> void:
 	bg.set_clock_instant(float(clock[0]))
 
 
+func _sync_counter() -> void:
+	var earned := int(econ.ledger["revenue"]) + int(econ.ledger["tips"])
+	order.set_info(Data.EVENINGS.size() - evening_idx, earned, econ.expenses(), econ.balance)
+
+
 func _process(delta: float) -> void:
+	_sync_counter()
 	if not patience_on or patience_paused:
 		return
 	patience -= delta

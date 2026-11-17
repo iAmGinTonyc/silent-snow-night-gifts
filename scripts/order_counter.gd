@@ -44,6 +44,10 @@ var thought_style: StyleBoxFlat
 var bubble_name := ""
 var bubble_t := 1.0
 var tips_shown := 0
+var info_days := 3
+var info_earned := 0
+var info_spent := 0
+var info_cash := 0
 var fly_coins: Array = []
 var hearts: Array = []
 var cat_ear_t := 0.0
@@ -260,11 +264,76 @@ func _draw_counter() -> void:
 	draw_rect(Rect2(0, COUNTER_Y, 1280, 180), Color("#5a3a26"))
 	for i in 4:
 		var r := Rect2(30.0 + float(i) * 310.0, COUNTER_Y + 54.0, 270, 100)
-		draw_rect(r, Color(0, 0, 0, 0.16))
-		U.stroke(self, U.rect_pts(r), Color(0, 0, 0, 0.5), 3.0, time, 1.0)
+		if i == 0:
+			_draw_days_plaque(r)
+		elif i == 1:
+			_draw_money_plaque(r)
+		else:
+			draw_rect(r, Color(0, 0, 0, 0.16))
+			U.stroke(self, U.rect_pts(r), Color(0, 0, 0, 0.5), 3.0, time, 1.0)
 	draw_rect(Rect2(0, COUNTER_Y, 1280, 30), Color("#8c5d3b"))
 	draw_rect(Rect2(0, COUNTER_Y + 30.0, 1280, 6), Color(0, 0, 0, 0.3))
 	U.stroke(self, PackedVector2Array([Vector2(0, COUNTER_Y), Vector2(1280, COUNTER_Y)]), U.INK, 5.0, time, 1.3, false)
+
+
+## Под прилавком два игровых окошка: сколько дней до Нового года и учёт денег за ночь.
+func set_info(days: int, earned: int, spent: int, cash: int) -> void:
+	info_days = days
+	info_earned = earned
+	info_spent = spent
+	info_cash = cash
+
+
+func _holly(c: Vector2) -> void:
+	for sg in [-1.0, 1.0]:
+		var sv: float = sg
+		U.fill_stroke(self, U.ellipse(c + Vector2(sv * 9.0, 0.0), 11.0, 5.0, sv * 0.5, 16), Color("#3f8a4f"), 2.5, time)
+	for k in 3:
+		draw_circle(c + Vector2(-5.0 + float(k) * 5.0, 5.0 + (3.0 if k == 1 else 0.0)), 3.6, Color("#d8343a"))
+		draw_circle(c + Vector2(-6.0 + float(k) * 5.0, 4.0 + (3.0 if k == 1 else 0.0)), 1.1, Color(1, 1, 1, 0.7))
+
+
+## Деревянная табличка с кремовой вставкой справа. Возвращает вставку для текста.
+func _draw_plaque(r: Rect2) -> Rect2:
+	draw_rect(Rect2(r.position + Vector2(4, 6), r.size), Color(0, 0, 0, 0.3))
+	U.fill_stroke(self, U.rect_pts(r), Color("#7a4a2c"), 4.0, time)
+	draw_rect(Rect2(r.position.x + 4.0, r.position.y + 4.0, r.size.x - 8.0, 6.0), Color(1, 1, 1, 0.12))
+	var inset := Rect2(r.position.x + 98.0, r.position.y + 12.0, r.size.x - 112.0, r.size.y - 24.0)
+	U.fill_stroke(self, U.rect_pts(inset), Color("#f3e6c4"), 3.0, time)
+	_holly(r.position + Vector2(26.0, 6.0))
+	return inset
+
+
+func _draw_days_plaque(r: Rect2) -> void:
+	var inset := _draw_plaque(r)
+	# календарный листок со снежинкой
+	var cr := Rect2(r.position.x + 18.0, r.position.y + 20.0, 64.0, 66.0)
+	U.fill_stroke(self, U.rect_pts(cr), Color("#fbf1d8"), 3.0, time)
+	U.fill_stroke(self, U.rect_pts(Rect2(cr.position.x, cr.position.y, cr.size.x, 16.0)), Color("#d8343a"), 3.0, time)
+	for k in 2:
+		draw_circle(Vector2(cr.position.x + 16.0 + float(k) * 32.0, cr.position.y + 4.0), 3.0, U.INK)
+	var sc := Vector2(cr.get_center().x, cr.position.y + 42.0)
+	for k in 3:
+		var a := PI * float(k) / 3.0 + time * 0.25
+		draw_line(sc - Vector2(cos(a), sin(a)) * 15.0, sc + Vector2(cos(a), sin(a)) * 15.0, Color("#4a7fc0"), 3.0)
+	var d := str(info_days)
+	var numw := font.get_string_size(d, HORIZONTAL_ALIGNMENT_LEFT, -1, 52).x
+	draw_string(font, Vector2(inset.position.x + 14.0, inset.end.y - 20.0), d, HORIZONTAL_ALIGNMENT_LEFT, -1, 52, U.INK)
+	var label := "day to\nNew Year" if info_days == 1 else "days to\nNew Year"
+	draw_multiline_string(font, Vector2(inset.position.x + 26.0 + numw, inset.position.y + 34.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, -1, Color("#6a3d28"))
+
+
+func _draw_money_plaque(r: Rect2) -> void:
+	var inset := _draw_plaque(r)
+	# столбик монет
+	var base := Vector2(r.position.x + 50.0, r.position.y + 78.0)
+	for k in 4:
+		var c := base + Vector2(0.0, -float(k) * 11.0)
+		U.fill_stroke(self, U.ellipse(c, 25.0, 10.0, 0.0, 20), Color("#e3b84b"), 3.0, time)
+		draw_colored_polygon(U.ellipse(c + Vector2(-5.0, -2.0), 9.0, 3.0, 0.0, 12), Color(1, 0.95, 0.65, 0.7))
+	draw_string(font, Vector2(inset.position.x + 10.0, inset.position.y + 20.0), "Earned tonight", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#6a3d28"))
+	draw_string(font, Vector2(inset.position.x + 10.0, inset.position.y + 54.0), "+%d" % info_earned, HORIZONTAL_ALIGNMENT_LEFT, -1, 36, Color("#8a5a10"))
+	draw_string(font, Vector2(inset.position.x + 10.0, inset.end.y - 6.0), "spent %d  ·  cash %d" % [info_spent, info_cash], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#6a3d28"))
 
 
 func _draw_register() -> void:

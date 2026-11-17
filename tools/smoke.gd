@@ -52,6 +52,14 @@ func wrap_gift(perfect: bool, vertical: bool) -> bool:
 	w.sheet_len = w.pull_len
 	w.pull_moved = true
 	w._finish_pull()
+	# линейка: размеры подарка и листа рисуются, замер тоже
+	w._select_tool("ruler")
+	w.ruler_has = true
+	w.ruler_a = w.CENTER
+	w.ruler_b = w.CENTER + Vector2(60.0, 40.0)
+	await process_frame
+	await process_frame
+	w._select_tool("ruler")
 	w._select_tool("scissors")
 	w._do_cut(w.CENTER + Vector2(-w.pull_len * 0.5 + 30.0, 0.0).rotated(w.rot))
 	await create_timer(0.6).timeout

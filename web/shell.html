@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<title>$GODOT_PROJECT_NAME</title>
+		<style>
+html, body, #canvas {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+body {
+	color: white;
+	background-color: #0e1432;
+	overflow: hidden;
+	touch-action: none;
+}
+
+#canvas {
+	display: block;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+/* Сообщения об ошибках (старые браузеры и так далее) остаются от стандартной страницы Godot. */
+#status {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	background-color: #0e1432;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	visibility: hidden;
+}
+
+#status-progress {
+	display: none;
+}
+
+#status-notice {
+	display: none;
+	background-color: #5b3943;
+	border-radius: 0.5rem;
+	border: 1px solid #9b3943;
+	color: #e0e0e0;
+	font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
+	line-height: 1.3;
+	margin: 0 2rem;
+	overflow: hidden;
+	padding: 1rem;
+	text-align: center;
+	z-index: 1;
+}
+
+/* Загрузочный экран: упаковка подарка по кругу, снег, полоса прогресса. */
+#loader {
+	position: absolute;
+	inset: 0;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	gap: 18px;
+	background: radial-gradient(ellipse at 50% 40%, #1b2a56 0%, #0e1432 70%);
+	transition: opacity 0.7s ease;
+	overflow: hidden;
+	font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+}
+
+#loader.done {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.snow {
+	position: absolute;
+	inset: -200px 0 0 0;
+	pointer-events: none;
+	background-repeat: repeat;
+	animation: snow-fall linear infinite;
+}
+
+.snow.s1 {
+	background-image:
+		radial-gradient(2.5px 2.5px at 30px 40px, #fff 60%, transparent 62%),
+		radial-gradient(2px 2px at 110px 120px, #fff 60%, transparent 62%),
+		radial-gradient(3px 3px at 190px 70px, #fff 60%, transparent 62%),
+		radial-gradient(2px 2px at 260px 200px, #fff 60%, transparent 62%);
+	background-size: 300px 260px;
+	animation-duration: 11s;
+	opacity: 0.85;
+}
+
+.snow.s2 {
+	background-image:
+		radial-gradient(1.5px 1.5px at 60px 90px, #cfe1ff 60%, transparent 62%),
+		radial-gradient(1.5px 1.5px at 170px 30px, #cfe1ff 60%, transparent 62%),
+		radial-gradient(1.5px 1.5px at 240px 160px, #cfe1ff 60%, transparent 62%);
+	background-size: 220px 180px;
+	animation-duration: 19s;
+	opacity: 0.6;
+}
+
+@keyframes snow-fall {
+	from { transform: translateY(0); }
+	to { transform: translateY(200px); }
+}
+
+#loader-title {
+	position: relative;
+	margin: 0;
+	font-size: clamp(22px, 5vmin, 38px);
+	font-weight: bold;
+	letter-spacing: 0.04em;
+	color: #f7e6b5;
+	text-shadow: 0 3px 0 #2a1a14, 0 0 18px rgba(247, 214, 120, 0.35);
+	text-align: center;
+}
+
+#loader-sprite {
+	position: relative;
+	width: min(70vmin, 360px);
+	aspect-ratio: 1 / 1;
+	border: 6px solid #2a1a14;
+	border-radius: 20px;
+	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+	background-image: url('loader.jpg');
+	background-size: 600% 600%;
+	background-repeat: no-repeat;
+	background-color: #14214a;
+}
+
+#loader-bar {
+	position: relative;
+	width: min(70vmin, 360px);
+	height: 16px;
+	border: 4px solid #2a1a14;
+	border-radius: 12px;
+	background: #3a2a22;
+	overflow: hidden;
+}
+
+#loader-fill {
+	height: 100%;
+	width: 0%;
+	background: repeating-linear-gradient(45deg, #e04a4a 0 12px, #f08a8a 12px 24px);
+	transition: width 0.25s ease-out;
+}
+
+#loader-bar.indeterminate #loader-fill {
+	width: 40%;
+	animation: slide 1.3s ease-in-out infinite alternate;
+}
+
+@keyframes slide {
+	from { margin-left: 0; }
+	to { margin-left: 60%; }
+}
+
+#loader-text {
+	position: relative;
+	margin: 0;
+	min-height: 1.4em;
+	font-size: clamp(14px, 2.6vmin, 18px);
+	color: #d9cdb2;
+	text-align: center;
+	letter-spacing: 0.02em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.snow { animation: none; }
+}
+		</style>
+		$GODOT_HEAD_INCLUDE
+	</head>
+	<body>
+		<canvas id="canvas">
+			Your browser does not support the canvas tag.
+		</canvas>
+
+		<noscript>
+			Your browser does not support JavaScript.
+		</noscript>
+
+		<div id="loader" role="status" aria-live="polite">
+			<div class="snow s1"></div>
+			<div class="snow s2"></div>
+			<h1 id="loader-title">Silent Snow Night Gifts</h1>
+			<div id="loader-sprite" aria-hidden="true"></div>
+			<div id="loader-bar" class="indeterminate"><div id="loader-fill"></div></div>
+			<p id="loader-text">Warming up the shop...</p>
+		</div>
+
+		<div id="status">
+			<progress id="status-progress"></progress>
+			<div id="status-notice"></div>
+		</div>
+
+		<script src="$GODOT_URL"></script>
+		<script>
+const GODOT_CONFIG = $GODOT_CONFIG;
+const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const statusOverlay = document.getElementById('status');
+	const statusNotice = document.getElementById('status-notice');
+	const loader = document.getElementById('loader');
+	const sprite = document.getElementById('loader-sprite');
+	const bar = document.getElementById('loader-bar');
+	const fill = document.getElementById('loader-fill');
+	const text = document.getElementById('loader-text');
+
+	// --- Загрузочный экран ---
+	const COLS = 6;
+	const ROWS = 6;
+	const FRAMES = 36;
+	const FPS = 12;
+	const MIN_SHOW_MS = 1400;
+	const holdForPreview = location.search.indexOf('loader=hold') >= 0;
+	const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	const started = performance.now();
+	const lines = [
+		'Warming up the shop...',
+		'Sharpening the scissors...',
+		'Counting snowflakes...',
+		'Asking the cat to stay off the paper...',
+		'Folding the first corners...',
+		'Polishing the little bell...',
+		'Wrapping up the loading...',
+	];
+	let frame = reduceMotion ? 22 : 0;
+	let lastTick = 0;
+	let lineIdx = 0;
+	let lineAt = 0;
+	let loaderAlive = true;
+
+	function showFrame(i) {
+		const c = i % COLS;
+		const r = Math.floor(i / COLS);
+		sprite.style.backgroundPosition = (c * 100 / (COLS - 1)) + '% ' + (r * 100 / (ROWS - 1)) + '%';
+	}
+
+	function tick(now) {
+		if (!loaderAlive) {
+			return;
+		}
+		if (!reduceMotion && now - lastTick >= 1000 / FPS) {
+			lastTick = now;
+			frame = (frame + 1) % FRAMES;
+			showFrame(frame);
+		}
+		if (now - lineAt > 2600) {
+			lineAt = now;
+			text.textContent = lines[lineIdx % lines.length];
+			lineIdx += 1;
+		}
+		requestAnimationFrame(tick);
+	}
+	showFrame(frame);
+	requestAnimationFrame(tick);
+
+	function setProgress(current, total) {
+		if (current > 0 && total > 0) {
+			bar.classList.remove('indeterminate');
+			fill.style.width = Math.min(100, Math.round(current * 100 / total)) + '%';
+		} else {
+			bar.classList.add('indeterminate');
+		}
+	}
+
+	function hideLoader() {
+		if (holdForPreview) {
+			return;
+		}
+		const wait = Math.max(0, MIN_SHOW_MS - (performance.now() - started));
+		setTimeout(function () {
+			fill.style.width = '100%';
+			loader.classList.add('done');
+			setTimeout(function () {
+				loaderAlive = false;
+				loader.remove();
+			}, 800);
+		}, wait);
+	}
+
+	// --- Запуск игры (как на стандартной странице Godot) ---
+	let initializing = true;
+	let statusMode = '';
+
+	function setStatusMode(mode) {
+		if (statusMode === mode || !initializing) {
+			return;
+		}
+		if (mode === 'hidden') {
+			statusOverlay.remove();
+			initializing = false;
+			hideLoader();
+			return;
+		}
+		if (mode === 'notice') {
+			loaderAlive = false;
+			loader.style.display = 'none';
+			statusOverlay.style.visibility = 'visible';
+			statusNotice.style.display = 'block';
+		}
+		statusMode = mode;
+	}
+
+	function setStatusNotice(msg) {
+		while (statusNotice.lastChild) {
+			statusNotice.removeChild(statusNotice.lastChild);
+		}
+		const noticeLines = msg.split('\n');
+		noticeLines.forEach((line) => {
+			statusNotice.appendChild(document.createTextNode(line));
+			statusNotice.appendChild(document.createElement('br'));
+		});
+	}
+
+	function displayFailureNotice(err) {
+		console.error(err);
+		if (err instanceof Error) {
+			setStatusNotice(err.message);
+		} else if (typeof err === 'string') {
+			setStatusNotice(err);
+		} else {
+			setStatusNotice('An unknown error occurred.');
+		}
+		setStatusMode('notice');
+		initializing = false;
+	}
+
+	const missing = Engine.getMissingFeatures({
+		threads: GODOT_THREADS_ENABLED,
+	});
+
+	if (missing.length !== 0) {
+		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
+			let serviceWorkerRegistrationPromise;
+			try {
+				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
+			} catch (err) {
+				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
+			}
+			// There's a chance that installing the service worker would fix the issue
+			Promise.race([
+				serviceWorkerRegistrationPromise.then((registration) => {
+					if (registration != null) {
+						return Promise.reject(new Error('Service worker already exists.'));
+					}
+					return registration;
+				}).then(() => engine.installServiceWorker()),
+				// For some reason, `getRegistration()` can stall
+				new Promise((resolve) => {
+					setTimeout(() => resolve(), 2000);
+				}),
+			]).then(() => {
+				// Reload if there was no error.
+				window.location.reload();
+			}).catch((err) => {
+				console.error('Error while registering service worker:', err);
+			});
+		} else {
+			// Display the message as usual
+			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+			displayFailureNotice(missingMsg + missing.join('\n'));
+		}
+	} else {
+		setStatusMode('progress');
+		engine.startGame({
+			'onProgress': function (current, total) {
+				setProgress(current, total);
+			},
+		}).then(() => {
+			setStatusMode('hidden');
+		}, displayFailureNotice);
+	}
+}());
+		</script>
+	</body>
+</html>

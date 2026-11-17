@@ -26,6 +26,8 @@ const BIN_POS := Vector2(1196, 446)
 const BELL_POS := Vector2(1150, 590)
 const BELL_R := 38.0
 const SCISSORS_POS := Vector2(1108, 522)
+const RULER_POS := Vector2(1218, 556)
+const PX_PER_CM := 6.0      # масштаб линейки: 1 см = 6 px
 const CARD_SIZE := Vector2(200, 240)
 
 # --- Механика упаковки ---
@@ -94,7 +96,11 @@ var ribbon_strokes: Array = []   # {pts, len, age, ribbon}
 var stroking := false
 var stroke_kind := ""
 var stroke_pts := PackedVector2Array()
-var active_tool := ""            # "", "scissors", "tape" или "ribbon"
+var active_tool := ""            # "", "scissors", "tape", "ribbon" или "ruler"
+var measuring := false           # линейка: тянем замер
+var ruler_has := false
+var ruler_a := Vector2.ZERO
+var ruler_b := Vector2.ZERO
 var ribbon_idx := -1
 var bow_size := 1.0
 var bow_drag := false
@@ -321,6 +327,8 @@ func _hit_test(pos: Vector2) -> String:
 		return "tape"
 	if pos.distance_to(SCISSORS_POS) < 36.0:
 		return "scissors"
+	if pos.distance_to(RULER_POS) < 36.0:
+		return "ruler"
 	if step == Step.PULL:
 		if _axis_rect("h").has_point(pos):
 			return "axis:h"
@@ -370,11 +378,13 @@ func _draw() -> void:
 	_draw_spools()
 	_draw_tape_dispenser()
 	_draw_scissors()
+	_draw_ruler_button()
 	_draw_bin()
 	_draw_bell()
 	_draw_choose_cards()
 	_draw_gift()
 	_draw_cut_preview()
+	_draw_ruler_overlay()
 	_draw_tool_cursor()
 	_draw_popups()
 
@@ -649,9 +659,8 @@ func _draw_choose_cards() -> void:
 		draw_style_box(card_style, r)
 		if c["type"] == "box":
 			var bx: Dictionary = Data.BOXES[int(c["idx"])]
-			var br := Rect2(center.x - 56.0, center.y - 60.0, 112.0, 84.0)
-			U.fill_stroke(self, U.rect_pts(br), Color.html(bx["color"]), 4.0, time)
-			U.fill_stroke(self, U.rect_pts(Rect2(br.position.x - 6.0, br.position.y - 14.0, br.size.x + 12.0, 22.0)), Color.html(bx["lid"]), 4.0, time)
+			var br := Rect2(center.x - 56.0, center.y - 62.0, 112.0, 84.0)
+			_draw_box_art(br, Color.html(bx["color"]), Color.html(bx["lid"]), false)
 			draw_string(font, Vector2(r.position.x, r.end.y - 52.0), str(bx["name"]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, U.INK)
 			draw_string(font, Vector2(r.position.x, r.end.y - 24.0), "Cost: %d" % int(bx["cost"]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 17, Color(0.7, 0.32, 0.25))
 		else:
@@ -708,15 +717,25 @@ func _draw_subject(ir: Rect2) -> void:
 		_draw_item_art(ir)
 
 
+## Коробка, вид строго сверху: стенки чуть шире крышки, на крышке шов, где сходятся клапаны,
+## и блик по краю. tape: поперёк шва клеится полоска скотча.
 func _draw_box_art(r: Rect2, col: Color, lid: Color, tape: bool) -> void:
-	draw_rect(Rect2(r.position + Vector2(4, 6), r.size), Color(0, 0, 0, 0.25))
-	U.fill_stroke(self, U.rect_pts(r), col, 4.0, time)
-	draw_rect(Rect2(r.position.x, r.position.y, r.size.x, 9.0), col.lightened(0.14))
-	var lid_r := Rect2(r.position.x - 4.0, r.position.y - 2.0, r.size.x + 8.0, r.size.y * 0.22)
-	U.fill_stroke(self, U.rect_pts(lid_r), lid, 3.5, time)
-	if tape:
-		draw_rect(Rect2(-9.0, r.position.y, 18.0, r.size.y), Color("#dccfab"))
-		draw_rect(Rect2(r.position.x + 12.0, r.end.y - 30.0, 38.0, 18.0), Color("#efe7d4"))
+	draw_rect(Rect2(r.position + Vector2(5, 7), r.size), Color(0, 0, 0, 0.25))
+	U.fill_stroke(self, U.rect_pts(r), col.darkened(0.14), 4.0, time)
+	var lr := r.grow(-7.0)
+	if lr.size.x < 10.0 or lr.size.y < 10.0:
+		return
+	U.fill_stroke(self, U.rect_pts(lr), lid, 3.0, time)
+	draw_rect(Rect2(lr.position + Vector2(3, 3), Vector2(lr.size.x - 6.0, 5.0)), lid.lightened(0.16))
+	var mid := lr.get_center()
+	if lr.size.x >= lr.size.y:
+		draw_line(Vector2(lr.position.x + 2.0, mid.y), Vector2(lr.end.x - 2.0, mid.y), U.INK, 2.5)
+		if tape:
+			draw_rect(Rect2(mid.x - 9.0, lr.position.y, 18.0, lr.size.y), Color("#dccfab"))
+	else:
+		draw_line(Vector2(mid.x, lr.position.y + 2.0), Vector2(mid.x, lr.end.y - 2.0), U.INK, 2.5)
+		if tape:
+			draw_rect(Rect2(lr.position.x, mid.y - 9.0, lr.size.x, 18.0), Color("#dccfab"))
 
 
 func _draw_item_art(ir: Rect2) -> void:
@@ -728,6 +747,8 @@ func _draw_item_art(ir: Rect2) -> void:
 
 
 func _reset_gift_state() -> void:
+	measuring = false
+	ruler_has = false
 	paper_idx = -1
 	sheet_len = 0.0
 	pulling = false
@@ -839,6 +860,8 @@ func _on_motion(pos: Vector2) -> void:
 	hover = _hit_test(pos)
 	mouse_pos = pos
 	Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if hover != "" else Input.CURSOR_ARROW)
+	if measuring:
+		ruler_b = pos
 	if stroking:
 		_move_stroke(pos)
 	if pulling:
@@ -869,6 +892,12 @@ func _on_press(pos: Vector2) -> void:
 		else:
 			toast.emit("Scissors are for cutting the paper after you pull it out")
 		return
+	if hit == "ruler":
+		if step == Step.PAPER or step == Step.PULL or step == Step.WRAP:
+			_select_tool("ruler")
+		else:
+			toast.emit("The ruler is for measuring a gift that is on the table")
+		return
 	if hit.begins_with("spool:"):
 		if step == Step.WRAP:
 			_select_ribbon_tool(int(hit.substr(6)))
@@ -878,6 +907,13 @@ func _on_press(pos: Vector2) -> void:
 	if step == Step.CHOOSE:
 		if hit.begins_with("card:"):
 			_choose_card(int(hit.substr(5)))
+		return
+	if active_tool == "ruler" and MAT_RECT.has_point(pos):
+		measuring = true
+		ruler_has = true
+		ruler_a = pos
+		ruler_b = pos
+		AudioSynth.play_sfx("click")
 		return
 	if step == Step.PAPER or step == Step.PULL:
 		if hit.begins_with("roll:"):
@@ -907,6 +943,7 @@ func _on_press(pos: Vector2) -> void:
 
 
 func _on_release() -> void:
+	measuring = false
 	if pulling:
 		pulling = false
 		_finish_pull()
@@ -1028,8 +1065,12 @@ func _end_flap_drag() -> void:
 
 func _select_tool(tool_name: String) -> void:
 	active_tool = "" if active_tool == tool_name else tool_name
+	measuring = false
+	ruler_has = false
 	AudioSynth.play_sfx("click")
-	if active_tool == "tape":
+	if active_tool == "ruler":
+		_hint("Ruler in hand: the size of the gift and of the paper is shown in cm. Press and drag to measure anything")
+	elif active_tool == "tape":
 		_hint("Tape in hand: press and drag anywhere on the gift, as much as you need")
 	elif active_tool == "scissors":
 		_hint("Scissors in hand: click on the paper where to cut. The piece from the cut to the loose end slides under the gift")
@@ -1272,6 +1313,8 @@ func _draw_tool_cursor() -> void:
 	if active_tool == "tape":
 		U.fill_stroke(self, U.ellipse(c, 14.0, 14.0, 0.0, 20), Color("#efe2b8"), 3.0, time)
 		draw_colored_polygon(U.ellipse(c, 6.0, 6.0, 0.0, 14), Color("#3a3a46"))
+	elif active_tool == "ruler":
+		_draw_ruler_icon(c + Vector2(4, 2), 0.7, -0.6, false)
 	elif active_tool == "scissors":
 		for sg in [-1.0, 1.0]:
 			var s: float = sg
@@ -1337,6 +1380,84 @@ func _draw_scissors() -> void:
 	draw_string(font, c + Vector2(-40, 56), "Scissors", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 13, Color(1, 0.96, 0.85, 0.9))
 
 
+## Деревянная линейка с делениями (иконка и курсор).
+func _draw_ruler_icon(c: Vector2, k: float, ang: float, shadow: bool) -> void:
+	var dir := Vector2(cos(ang), sin(ang))
+	var perp := Vector2(-dir.y, dir.x)
+	var hl := 38.0 * k
+	var hw := 11.0 * k
+	if shadow:
+		draw_colored_polygon(U.ellipse(c + Vector2(0, 26.0 * k), 40.0 * k, 8.0 * k), Color(0, 0, 0, 0.25))
+	var pts := PackedVector2Array([c - dir * hl - perp * hw, c + dir * hl - perp * hw, c + dir * hl + perp * hw, c - dir * hl + perp * hw])
+	U.fill_stroke(self, pts, Color("#d9b46a"), 3.0, time)
+	for i in range(-6, 7):
+		var p := c + dir * float(i) * 5.6 * k - perp * hw
+		var ln := (hw * 0.9) if i % 2 == 0 else (hw * 0.55)
+		draw_line(p, p + perp * ln, U.INK, 1.6)
+
+
+func _draw_ruler_button() -> void:
+	var on := active_tool == "ruler"
+	var hov := hover == "ruler"
+	_draw_ruler_icon(RULER_POS + Vector2(0, -4), 1.0, -0.6 if not (on or hov) else -0.75, true)
+	if on:
+		draw_arc(RULER_POS + Vector2(0, -4), 44.0, 0.0, TAU, 40, Color(1, 0.93, 0.55, 0.85), 3.0)
+	draw_string(font, RULER_POS + Vector2(-40, 46), "Ruler", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 13, Color(1, 0.96, 0.85, 0.9))
+
+
+## Размерная линия с засечками каждый сантиметр и подписью.
+func _dim_line(a: Vector2, b: Vector2, text: String, col: Color, label_off: Vector2) -> void:
+	var d := b - a
+	if d.length() < 2.0:
+		return
+	var n := d.normalized()
+	var perp := Vector2(-n.y, n.x)
+	draw_line(a, b, U.INK, 5.0)
+	draw_line(a, b, col, 2.5)
+	for pe in [a, b]:
+		var q: Vector2 = pe
+		draw_line(q - perp * 10.0, q + perp * 10.0, U.INK, 5.0)
+		draw_line(q - perp * 9.0, q + perp * 9.0, col, 2.5)
+	var cm := int(d.length() / PX_PER_CM)
+	for k in range(1, cm):
+		var q2 := a + n * PX_PER_CM * float(k)
+		var ln := 7.0 if k % 5 == 0 else 4.0
+		draw_line(q2, q2 + perp * ln, col, 1.5)
+	var mid := (a + b) * 0.5 + label_off
+	var sz := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16)
+	draw_rect(Rect2(mid - Vector2(sz.x * 0.5 + 8.0, 17.0), Vector2(sz.x + 16.0, 26.0)), Color(0.12, 0.08, 0.07, 0.88))
+	draw_string(font, mid + Vector2(-sz.x * 0.5, 2.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.96, 0.8))
+
+
+## Точка в системе координат бумаги (u вдоль вытяжки, v поперёк) в координатах экрана.
+func _paper_pt(u: float, v: float) -> Vector2:
+	var s := maxf(gift_scale, 0.001)
+	return CENTER + gift_off + (Vector2(paper_shift + u, v) * s).rotated(rot)
+
+
+## Линейка в руке: размеры подарка и листа в сантиметрах, плюс свободный замер перетаскиванием.
+func _draw_ruler_overlay() -> void:
+	if active_tool != "ruler" or item.is_empty():
+		return
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var s := maxf(gift_scale, 0.001)
+	var half := Vector2(item_w, item_h) * 0.5 * s
+	var c := CENTER + gift_off
+	var gcol := Color("#8fe0c0")
+	_dim_line(c + Vector2(-half.x, half.y + 20.0), c + Vector2(half.x, half.y + 20.0), "%d cm" % roundi(item_w / PX_PER_CM), gcol, Vector2(0, 22))
+	_dim_line(c + Vector2(half.x + 20.0, -half.y), c + Vector2(half.x + 20.0, half.y), "%d cm" % roundi(item_h / PX_PER_CM), gcol, Vector2(40, 0))
+	if (step == Step.PULL or step == Step.WRAP) and not folded.has(true) and not tucked:
+		var plen := pull_len if step == Step.PULL else sheet_len
+		var need := _l_min()
+		var pcol := Color("#ffe07a") if plen >= need else Color("#ff9a7a")
+		var v := -(_across() * 0.5 + MARGIN + 34.0)
+		var tx := "Paper %d cm (need %d+)" % [roundi(plen / PX_PER_CM), ceili(need / PX_PER_CM)]
+		_dim_line(_paper_pt(-plen * 0.5, v), _paper_pt(plen * 0.5, v), tx, pcol, Vector2(0, -24) if rot == 0.0 else Vector2(60, 0))
+	if ruler_has:
+		var d := ruler_b - ruler_a
+		_dim_line(ruler_a, ruler_b, "%.1f cm" % (d.length() / PX_PER_CM), Color("#a8d4ff"), Vector2(0, -24))
+
+
 ## Где ножницы отрежут: линия реза вдоль листа и длина куска.
 func _draw_cut_preview() -> void:
 	if step != Step.PULL or active_tool != "scissors" or not MAT_RECT.has_point(mouse_pos):
@@ -1357,15 +1478,11 @@ func _draw_pull_view(paper: Dictionary, ir: Rect2) -> void:
 	var u0 := -pull_len * 0.5
 	var u1 := pull_len * 0.5
 	var half_v := _across() * 0.5 + MARGIN
-	var pbase := Color.html(paper["base"])
-	var back := Color("#efe3c8").lerp(pbase, 0.16)
 	_set_paper_transform()
 	var sr := Rect2(u0, -half_v, pull_len, half_v * 2.0)
 	draw_rect(Rect2(sr.position + Vector2(5, 7), sr.size), Color(0, 0, 0, 0.22))
-	draw_rect(sr, back)
-	draw_rect(Rect2(u0, -half_v, pull_len, 5.0), pbase)
-	draw_rect(Rect2(u0, half_v - 5.0, pull_len, 5.0), pbase)
-	draw_rect(Rect2(u1 - 9.0, -half_v, 9.0, half_v * 2.0), back.darkened(0.1))
+	_draw_print(sr, paper, u0, 1.0, PackedVector2Array())
+	draw_rect(Rect2(u1 - 9.0, -half_v, 9.0, half_v * 2.0), Color(0, 0, 0, 0.12))
 	_rect_stroke(sr, 3.0)
 	var prog := clampf(inverse_lerp(_pull_min(), _pull_max(), pull_len), 0.0, 1.0)
 	_draw_roll_on_table(paper, u0, half_v, lerpf(52.0, 36.0, prog))   # рулон очень большой: при максимальной раскатке худеет лишь на ~30%
@@ -1416,7 +1533,6 @@ func _draw_gift() -> void:
 	if paper_idx >= 0:
 		paper = Data.PAPERS[paper_idx]
 	var pbase := Color.html(paper["base"]) if not paper.is_empty() else Color.WHITE
-	var back := Color("#efe3c8").lerp(pbase, 0.16)
 	var clip := clip_cur
 	var clip_p := _clip_to_paper(clip_cur)
 	var lean: Array[float] = []
@@ -1439,7 +1555,7 @@ func _draw_gift() -> void:
 		var base_r := Rect2(-bw * 0.5, -hh, bw, ih)
 		if clip_p.size() < 3:
 			draw_rect(Rect2(base_r.position + Vector2(5, 7), base_r.size), Color(0, 0, 0, 0.22))
-		_fill_rect(base_r, back, clip_p)
+		_draw_print(base_r, paper, base_r.position.x, 1.0, clip_p)
 		for i in 2:
 			var sgn := -1.0 if i == 0 else 1.0
 			var hinge := sgn * hw
@@ -1451,9 +1567,8 @@ func _draw_gift() -> void:
 				var shade := lerpf(0.78, 1.0, clampf((theta[i] - PI * 0.5) / (PI * 0.5), 0.0, 1.0))
 				var lr := Rect2(xa, -hh - mt, xb - xa, ih + mt + mb)
 				draw_rect(Rect2(lr.position + Vector2(4, 6), lr.size), Color(0, 0, 0, 0.18))
-				draw_rect(lr, back.darkened(1.0 - shade))
-				draw_rect(Rect2(xa, lr.position.y, xb - xa, 4.0), pbase)
-				draw_rect(Rect2(xa, lr.end.y - 4.0, xb - xa, 4.0), pbase)
+				_draw_print(lr, paper, -bw * 0.5, 1.0, PackedVector2Array())
+				draw_rect(lr, Color(0, 0, 0, 1.0 - shade))
 				_rect_stroke(lr, 3.0)
 		for i in range(2, 4):
 			var sgv := -1.0 if i == 2 else 1.0
@@ -1468,8 +1583,8 @@ func _draw_gift() -> void:
 				var xr := half + fh * lean[1]
 				var shade_v := lerpf(0.78, 1.0, clampf((theta[i] - PI * 0.5) / (PI * 0.5), 0.0, 1.0))
 				var vr := Rect2(xl, ya, xr - xl, yb - ya)
-				draw_rect(vr, back.darkened(1.0 - shade_v))
-				draw_rect(Rect2(xl, ya if sgv > 0.0 else yb - 4.0, xr - xl, 4.0), pbase)
+				_draw_print(vr, paper, xl, 1.0, PackedVector2Array())
+				draw_rect(vr, Color(0, 0, 0, 1.0 - shade_v))
 				_rect_stroke(vr, 3.0)
 
 	# 2. сама вещь или коробка и собранный хвост (в системе координат стола)
@@ -1518,7 +1633,7 @@ func _draw_gift() -> void:
 			var ye2 := hinge_y2 - sgv2 * fv * ctv2
 			var ya2 := minf(hinge_y2, ye2)
 			var yb2 := maxf(hinge_y2, ye2)
-			var er := Rect2(-hw, ya2, iw, yb2 - ya2)
+			var er := Rect2(-bw * 0.5, ya2, bw, yb2 - ya2)   # длина как у листа: короткий лист короче подарка
 			_draw_print(er, paper, er.position.x, 1.0, clip_p)
 			if clip_p.size() < 3:
 				draw_rect(er, Color(0, 0, 0, 0.16 + 0.16 * (1.0 - ctv2)))
