@@ -23,7 +23,8 @@ const ACCEPT_RECT := Rect2(490, 598, 300, 66)
 const CUSTOMER_RECT := Rect2(280, 120, 240, 420)
 const GIFT_POS := Vector2(640, 510)
 const BUBBLE_X := 540.0
-const BUBBLE_W := 580.0
+const BUBBLE_W := 480.0   # правый край левее панели терпения вверху справа
+const BUBBLE_FONT := 25
 const BUBBLE_TOP := 36.0
 const BUBBLE_COLOR := Color(0.99, 0.96, 0.9)
 
@@ -362,7 +363,7 @@ func _draw_accept() -> void:
 func _draw_bubble() -> void:
 	if bubble_text == "":
 		return
-	var tsize := font.get_multiline_string_size(bubble_text, HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 56.0, 28)
+	var tsize := font.get_multiline_string_size(bubble_text, HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 56.0, BUBBLE_FONT)
 	var h := tsize.y + 66.0
 	var rect := Rect2(BUBBLE_X, BUBBLE_TOP, BUBBLE_W, h)
 	var s := maxf(U.ease_out_elastic(bubble_t), 0.001)
@@ -385,8 +386,8 @@ func _draw_bubble() -> void:
 		draw_polyline(PackedVector2Array([tail[0], tail[2], tail[1]]), U.INK, 4.0, true)
 		draw_rect(Rect2(rect.position.x + 17.0, rect.end.y - 62.0, 6.0, 46.0), BUBBLE_COLOR)
 	draw_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 34.0), bubble_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.62, 0.38, 0.26) if bubble_kind == "speech" else Color(0.32, 0.4, 0.62))
-	draw_multiline_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 44.0 + font.get_ascent(28)), bubble_text,
-		HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 56.0, 28, -1, U.INK)
+	draw_multiline_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 44.0 + font.get_ascent(BUBBLE_FONT)), bubble_text,
+		HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 56.0, BUBBLE_FONT, -1, U.INK)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 

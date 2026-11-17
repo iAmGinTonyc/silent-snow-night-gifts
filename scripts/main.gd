@@ -29,7 +29,7 @@ var customer_idx := 0
 var current: Dictionary = {}
 var epoch := 0
 var redo_count := 0
-var current_match := ""     # у покупателя: perfect, ok или miss
+var current_match := ""     # угадали ли мысли клиента: perfect или miss (тогда выбрал сам)
 var chosen_item := ""
 var patience_paused := false
 var screen := "order"
@@ -84,7 +84,6 @@ func _ready() -> void:
 	wrap.cost.connect(_on_cost)
 	wrap.gift_ready.connect(_on_gift_ready)
 	customer.arrived.connect(_on_customer_arrived)
-	order.accept_pressed.connect(_on_accept)
 	order.offer_pressed.connect(_on_offer)
 	hud.start_pressed.connect(_start_game)
 	hud.next_pressed.connect(_on_next_evening)
@@ -186,96 +185,67 @@ func _next_customer() -> void:
 	customer.arrive(current)
 
 
-func _is_buyer() -> bool:
-	return current.get("kind", "wrap") == "buyer"
-
-
 func _on_customer_arrived() -> void:
 	current_match = ""
 	chosen_item = ""
-	if _is_buyer():
-		# покупатель: не принёс вещь, ему нужен подарок из наличия
-		if current["mode"] == "mind":
-			order.show_thought(current["name"], current["thought"])
-			hud.set_hint("We can read their mind: pick a gift from the shelf")
-		else:
-			order.show_bubble(current["name"], current["request"])
-			hud.set_hint("They ask for a gift: pick it from the shelf")
-		order.input_enabled = true
-		order.set_offer(true)
-		patience = patience_max
-		patience_on = true
-		status.show_patience(true)
-		status.set_patience(1.0, patience_max)
-		return
-	order.show_bubble(current["name"], current["request"])
+	# Клиент всегда приходит с пустыми руками: мы читаем его мысли и предлагаем подарок с полки.
+	order.show_thought(current["name"], current["thought"])
+	hud.set_hint("We can read their mind: pick a gift from the shelf")
 	order.input_enabled = true
-	order.set_accept(true)
+	order.set_offer(true)
+	patience = patience_max
+	patience_on = true
+	status.show_patience(true)
+	status.set_patience(1.0, patience_max)
 
 
-## Покупателю предлагают подарок с полки. Угадали мысли, и он радостнее и охотнее даёт чаевые.
+## Предлагаем подарок с полки. Угадали мысли: клиент радуется и охотнее даёт чаевые.
+## Не угадали: клиент сам выбирает то, что ему нужно.
 func _on_offer(offered: String) -> void:
-	if not _is_buyer():
-		return
 	var e := epoch
 	var ideal: String = current["ideal"]
-	var okay: Array = current["okay"]
-	var level := "miss"
-	if offered == ideal:
-		level = "perfect"
-	elif okay.has(offered):
-		level = "ok"
-	if current["mode"] == "ask" and level != "perfect":
-		hud.show_toast("That is not what they asked for")
-		customer.set_mood(0)
-		AudioSynth.play_sfx("dull")
-		return
+	var guessed := offered == ideal
 	order.set_offer(false)
 	order.input_enabled = false
 	patience_paused = true
 	hud.set_hint("")
-	current_match = level
-	chosen_item = offered
-	var it: Dictionary = Data.ITEMS[offered]
+	current_match = "perfect" if guessed else "miss"
+	chosen_item = ideal
+	if not guessed:
+		order.show_bubble(current["name"], str(Data.BUYER_LINES["miss"]))
+		AudioSynth.play_sfx("dull")
+		await get_tree().create_timer(2.2).timeout
+		if e != epoch:
+			return
+	var it: Dictionary = Data.ITEMS[ideal]
 	_on_cost("stock", int(it["stock"]))
-	order.give_item(offered)
-	customer.set_mood(2 if level == "perfect" else (1 if level == "ok" else 0))
-	order.show_bubble(current["name"], str(Data.BUYER_LINES[level]))
+	order.give_item(ideal)
+	if guessed:
+		customer.set_mood(2)
+		order.show_bubble(current["name"], str(Data.BUYER_LINES["perfect"]))
+	else:
+		order.show_bubble(current["name"], str(Data.BUYER_LINES["choose"]))
 	await order.item_given
 	if e != epoch:
 		return
 	await get_tree().create_timer(1.6).timeout
 	if e != epoch:
 		return
+	# после выбора подарка клиент говорит, как его упаковать (то же стоит в талоне на столе)
+	var pack := str(current.get("pack", ""))
+	if pack != "":
+		order.show_bubble(current["name"], pack)
+		await get_tree().create_timer(2.6).timeout
+		if e != epoch:
+			return
 	order.hide_bubble()
 	await _switch_to("wrap")
 	if e != epoch:
 		return
-	wrap.set_ticket(current["name"], Data.ticket_lines(current, offered))
-	wrap.place_item(offered)
+	wrap.set_ticket(current["name"], Data.ticket_lines(current, ideal))
+	wrap.place_item(ideal)
 	wrap.input_enabled = true
 	patience_paused = false
-
-
-## Клиент отдаёт вещь, экран переключается на рабочий стол.
-func _on_accept() -> void:
-	var e := epoch
-	order.input_enabled = false
-	order.hide_bubble()
-	order.give_item(current["item"])
-	await order.item_given
-	if e != epoch:
-		return
-	await _switch_to("wrap")
-	if e != epoch:
-		return
-	wrap.set_ticket(current["name"], Data.ticket_lines(current, str(current["item"])))
-	wrap.place_item(current["item"])
-	wrap.input_enabled = true
-	patience = patience_max
-	patience_on = true
-	status.show_patience(true)
-	status.set_patience(1.0, patience_max)
 
 
 func _on_timeout() -> void:
@@ -370,8 +340,7 @@ func _on_gift_ready(res: Dictionary) -> void:
 		return
 
 	var it: Dictionary = Data.ITEMS[item_id]
-	var buyer := _is_buyer()
-	var pay: int = int(it["sell"]) if buyer else int(it["price"])
+	var pay: int = int(it["sell"])
 	econ.earn(pay)
 	status.set_money(econ.balance)
 	order.pay_pop()
@@ -395,15 +364,12 @@ func _on_gift_ready(res: Dictionary) -> void:
 		line = current["ok"]
 	if frac < 0.25:
 		tips = maxi(tips - 1, 1)
-	if buyer:
-		var chance := 0.8
-		if current_match == "perfect":
-			tips = maxi(tips, 2)
-			chance = 1.0
-		elif current_match == "miss":
-			chance = 0.4
-		if randf() > chance:
-			tips = 0
+	var chance := 0.8
+	if current_match == "perfect":
+		tips = maxi(tips, 2)
+		chance = 1.0
+	if randf() > chance:
+		tips = 0
 	if neat < 0.4:
 		tips = 0
 	if tips == 0:
@@ -476,8 +442,8 @@ func _evaluate(c: Dictionary, r: Dictionary) -> float:
 		if want_wrap == "box" or want_wrap == "shape":
 			s += 0.15 if got_wrap == want_wrap else -0.25
 	s += float(r["bonus"])
-	if _is_buyer():
-		s += {"perfect": 0.25, "ok": 0.10, "miss": -0.15}.get(current_match, 0.0)
+	if current_match == "perfect":
+		s += 0.25   # угадали мысли клиента
 	return clampf(s, 0.0, 1.0)
 
 

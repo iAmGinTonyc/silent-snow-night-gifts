@@ -121,7 +121,7 @@ func run() -> void:
 	var served := 0
 	var crooked_done := false
 	while served < 30:
-		var ok := await wait_until(func(): return (main.customer.state == "idle" and (main.order.accept_enabled or main.order.offer_enabled)) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
+		var ok := await wait_until(func(): return (main.customer.state == "idle" and main.order.offer_enabled) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
 		if not ok:
 			break
 		if main.hud.final_root.visible:
@@ -140,20 +140,13 @@ func run() -> void:
 			continue
 		var cname: String = main.current["name"]
 		var before: int = main.customer_idx
-		if main.current.get("kind", "wrap") == "buyer":
-			var ideal: String = main.current["ideal"]
-			print("--- ", cname, " (покупатель, ", main.current["mode"], ") ideal=", ideal)
-			if main.current["mode"] == "ask":
-				var wrong := "bear" if ideal != "bear" else "train"
-				main._on_offer(wrong)
-				await create_timer(0.3).timeout
-			var pick := ideal
-			if main.current["mode"] == "mind" and served % 3 == 1:
-				pick = "bear" if ideal != "bear" else "ornament"
-			main._on_offer(pick)
-		else:
-			print("--- ", cname, " item=", main.current["item"], " wants wrap=", main.current["wrap"])
-			main._on_accept()
+		var ideal: String = main.current["ideal"]
+		var guessed := served % 3 != 1
+		print("--- ", cname, " ideal=", ideal, " guess=", guessed)
+		var pick := ideal
+		if not guessed:
+			pick = "bear" if ideal != "bear" else "ornament"
+		main._on_offer(pick)
 		var perfect := crooked_done or served != 2
 		crooked_done = crooked_done or not perfect
 		var attempts := 0

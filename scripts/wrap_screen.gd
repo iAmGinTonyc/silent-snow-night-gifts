@@ -1368,7 +1368,7 @@ func _draw_pull_view(paper: Dictionary, ir: Rect2) -> void:
 	draw_rect(Rect2(u1 - 9.0, -half_v, 9.0, half_v * 2.0), back.darkened(0.1))
 	_rect_stroke(sr, 3.0)
 	var prog := clampf(inverse_lerp(_pull_min(), _pull_max(), pull_len), 0.0, 1.0)
-	_draw_roll_on_table(paper, u0, half_v, lerpf(52.0, 30.0, prog))
+	_draw_roll_on_table(paper, u0, half_v, lerpf(52.0, 36.0, prog))   # рулон очень большой: при максимальной раскатке худеет лишь на ~30%
 	_set_gift_transform()
 	_draw_subject(ir)
 
