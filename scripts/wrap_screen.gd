@@ -92,7 +92,10 @@ const REACH := 12.0           # насколько за край бумаги м
 const RIBBON_PICK := 34.0     # на каком расстоянии от края можно «взять» начало ленты
 const RIBBON_MIN_PIECE := 36.0  # самый короткий кусок ленты от края до края
 const FOLD_MIN_DRAG := 12.0   # меньше этого рука просто лежит на бумаге
-const FOLD_COMMIT_PHI := 1.22 # около 70 градусов: дальше сгиб довершается сам, меньше — пружинит назад
+const FOLD_COMMIT_PHI := 0.9  # около 50 градусов: дальше сгиб довершается сам, меньше пружинит назад
+const FOLD_GRAB_R := 34.0     # бумагу можно взять и рядом с краем листа: ближайший свободный клапан в этом радиусе
+const TAPE_SNAP_R := 26.0     # скотч липнет к краю или шву не дальше этого
+const TAPE_TAP_LEN := 96.0    # полоска скотча по касанию вдоль края
 const FOLD_SNAP_DEG := 5.0    # линия сгиба в пределах этого угла от оси или диагонали становится ровной
 const FOLD_SNAP_EDGE := 10.0  # сгиб ближе этого к ребру вещи ложится точно на ребро
 const CURL_R := 18.0          # радиус изгиба бумаги у сгиба, пока клапан в движении
@@ -147,6 +150,9 @@ var fold_ref := PackedVector2Array()  # прямоугольник вокруг 
 var fold_drag := false                # рука держит бумагу
 var fold_grab_idx := -1
 var fold_grab_layer := 0
+var fold_press := Vector2.ZERO        # где коснулись (координаты бумаги)
+var fold_moved := false               # рука сдвинулась дальше порога: иначе это касание
+var tape_snap: Dictionary = {}        # край, вдоль которого идёт скотч: {a, b, start}
 var fold_P := Vector2.ZERO            # где схватили (координаты бумаги)
 var fold_cur: Dictionary = {}         # параметры сгиба под рукой: {valid, n, c, phi, err, on_edge}
 var fold_anim: Dictionary = {}        # сгиб, который доводится сам: {n, c, phi, target, kind}
@@ -929,6 +935,7 @@ func _reset_gift_state() -> void:
 	ribbon_strokes = []
 	stroking = false
 	stroke_kind = ""
+	tape_snap = {}
 	stroke_pts = PackedVector2Array()
 	active_tool = ""
 	ribbon_idx = -1
@@ -1305,7 +1312,7 @@ func _do_cut_line(u_top: float, u_bot: float, wobble: float) -> void:
 		toast.emit("Not enough paper: the gift may come out crooked")
 	elif absf(cut_skew) > 24.0:
 		toast.emit("The cut came out slanted: the flaps will be uneven")
-	_hint("Fold the paper: grab it and drag it over the gift. A fold in the middle stops at the gift. Undo button (or right click) undoes")
+	_hint("Click a flap to fold it over the gift, or drag it. Undo button (or right click) undoes")
 
 
 ## --- Складывание: геометрия лежит в scripts/paper_fold.gd -------------------------------------
@@ -1386,8 +1393,8 @@ func _fold_params(p: Vector2, q: Vector2) -> Dictionary:
 		h = maxf(h, n.dot(v))
 	if absf(c - h) <= FOLD_SNAP_EDGE:
 		c = h
-	elif fold_grab_layer == 0 and c > h:
-		c = h   # свободный край листа переворачивается через ребро вещи целиком, а не загибается кончиком
+	elif c > h and n.dot(p) > h + 2.0:
+		c = h   # всё, что лежит за ребром вещи, переворачивается через это ребро целиком, а не загибается кончиком
 	c = fold.clamp_crease(n, c, gift_hull)
 	var np := n.dot(p) - c
 	if np < 0.5:
@@ -1405,23 +1412,57 @@ func _fold_begin(pos: Vector2) -> void:
 		return
 	var tp := _to_paper(pos - CENTER)
 	var hit: Dictionary = fold.topmost_at(tp)
-	if hit.is_empty():
-		return
-	if int(hit["layer"]) == 0 and Geometry2D.is_point_in_polygon(tp, gift_hull):
-		return   # голая вещь, не бумага
+	var bare := not hit.is_empty() and int(hit["layer"]) == 0 and Geometry2D.is_point_in_polygon(tp, gift_hull)
+	var grab_idx := -1
+	var grab_layer := 0
+	var grab_p := tp
+	if hit.is_empty() or bare:
+		# мимо бумаги или по голой вещи: берём ближайший свободный клапан рядом (на сенсорном экране палец не попадает точно)
+		var fl := _nearest_flap(tp)
+		if fl.is_empty():
+			return
+		grab_idx = int(fl["idx"])
+		grab_p = fl["centroid"]
+	else:
+		grab_idx = int(hit["idx"])
+		grab_layer = int(hit["layer"])
 	fold_drag = true
-	fold_grab_idx = int(hit["idx"])
-	fold_grab_layer = int(hit["layer"])
-	fold_P = tp
+	fold_moved = false
+	fold_press = tp
+	fold_grab_idx = grab_idx
+	fold_grab_layer = grab_layer
+	fold_P = grab_p
 	fold_cur = {}
 	fold_snd_phi = 0.0
 	AudioSynth.play_sfx("paper_rustle", -5.0, randf_range(0.9, 1.15))
 
 
+## Ближайший к точке свободный клапан слоя 0 (его центр вне прямоугольника вокруг вещи), не дальше FOLD_GRAB_R.
+func _nearest_flap(tp: Vector2) -> Dictionary:
+	var best := {}
+	var bd := FOLD_GRAB_R
+	for i in fold.facets.size():
+		var f: Dictionary = fold.facets[i]
+		if int(f["layer"]) != 0:
+			continue
+		var pl := Fold.poly(f)
+		var cen := Fold.centroid(pl)
+		if Geometry2D.is_point_in_polygon(cen, fold_ref):
+			continue
+		var d := Fold.dist_to_poly(tp, pl)
+		if d <= bd:
+			bd = d
+			best = {"idx": i, "centroid": cen}
+	return best
+
+
 func _fold_move(pos: Vector2) -> void:
 	if not fold_drag:
 		return
-	fold_cur = _fold_params(fold_P, _to_paper(pos - CENTER))
+	var qp := _to_paper(pos - CENTER)
+	if qp.distance_to(fold_press) > FOLD_MIN_DRAG:
+		fold_moved = true
+	fold_cur = _fold_params(fold_P, qp)
 	if fold_cur.get("valid", false):
 		var ph := float(fold_cur["phi"])
 		if absf(ph - fold_snd_phi) > 0.3:
@@ -1435,6 +1476,9 @@ func _fold_end() -> void:
 	fold_drag = false
 	var cur := fold_cur
 	fold_cur = {}
+	if not fold_moved:
+		_fold_tap()
+		return
 	if cur.get("blocked", false):
 		AudioSynth.play_sfx("dull")
 		toast.emit("The gift is in the way: the paper cannot bend there")
@@ -1445,6 +1489,40 @@ func _fold_end() -> void:
 	var commit := phi > FOLD_COMMIT_PHI
 	fold_anim = {"n": cur["n"], "c": cur["c"], "phi": phi, "target": PI if commit else 0.0,
 		"kind": "commit" if commit else "spring", "err": cur["err"], "on_edge": cur["on_edge"]}
+
+
+## Направление, в котором лежит клапан относительно вещи: одна из четырёх осей (n смотрит от вещи к клапану).
+func _auto_dir(p: Vector2) -> Vector2:
+	var r := _poly_bounds(gift_hull)
+	var dx := 0.0
+	var dy := 0.0
+	if p.x < r.position.x:
+		dx = p.x - r.position.x
+	elif p.x > r.end.x:
+		dx = p.x - r.end.x
+	if p.y < r.position.y:
+		dy = p.y - r.position.y
+	elif p.y > r.end.y:
+		dy = p.y - r.end.y
+	if dx == 0.0 and dy == 0.0:
+		return Vector2.ZERO
+	if absf(dx) / maxf(r.size.x, 1.0) >= absf(dy) / maxf(r.size.y, 1.0):
+		return Vector2(signf(dx), 0.0)
+	return Vector2(0.0, signf(dy))
+
+
+## Касание клапана: он сам переваливается через ближайшее ребро вещи.
+func _fold_tap() -> void:
+	var n := _auto_dir(fold_P)
+	if n == Vector2.ZERO:
+		return
+	var h := -INF
+	for v in gift_hull:
+		h = maxf(h, n.dot(v))
+	if n.dot(fold_P) - h < 2.0:
+		return
+	var c: float = fold.clamp_crease(n, h, gift_hull)
+	fold_anim = {"n": n, "c": c, "phi": 0.0, "target": PI, "kind": "commit", "err": 0.0, "on_edge": true}
 
 
 ## Правая кнопка или Ctrl+Z: последний сгиб раскладывается обратно, бумага при этом мнётся (штраф к аккуратности).
@@ -1515,6 +1593,7 @@ func _select_tool(tool_name: String) -> void:
 		toast.emit("Fold the paper first, then tape it")
 		return
 	active_tool = "" if active_tool == tool_name else tool_name
+	tape_snap = {}
 	ribbon_anchored = false
 	measuring = false
 	ruler_has = false
@@ -1530,7 +1609,7 @@ func _select_tool(tool_name: String) -> void:
 	if active_tool == "ruler":
 		_hint("Ruler in hand: the size of the gift and of the paper is shown in cm. Press and drag to measure anything")
 	elif active_tool == "tape":
-		_hint("Tape in hand: press and drag anywhere on the gift, as much as you need")
+		_hint("Tape in hand: click an edge or seam to tape along it, or drag a strip")
 	elif active_tool == "scissors":
 		_hint("Scissors in hand: press at a long edge and drag across along your pencil line. The paper parts when the cut reaches the other edge")
 	elif step == Step.WRAP:
@@ -1563,11 +1642,45 @@ func _stroke_region() -> PackedVector2Array:
 	return _paper_footprint()
 
 
+## Видимые края и швы бумаги в координатах стола (повёрнутых вместе с листом), вдоль них липнет скотч.
+func _tape_edges() -> Array:
+	var out: Array = []
+	if fold == null or (tucked and wrap_mode == "shape" and clip_cur.size() >= 3):
+		return out
+	for e in fold.visible_edges(gift_hull):
+		var seg: Array = e
+		out.append([(seg[0] as Vector2).rotated(rot), (seg[1] as Vector2).rotated(rot)])
+	return out
+
+
+## Ближайший к lp край или шов не дальше TAPE_SNAP_R: {a, b, pt}.
+func _tape_snap_at(lp: Vector2) -> Dictionary:
+	var best := {}
+	var bd := TAPE_SNAP_R
+	for e in _tape_edges():
+		var a: Vector2 = e[0]
+		var b: Vector2 = e[1]
+		var q := Geometry2D.get_closest_point_to_segment(lp, a, b)
+		var d := lp.distance_to(q)
+		if d < bd:
+			bd = d
+			# полоска ложится чуть внутрь от края (к центру вещи), чтобы лежать на бумаге, а не висеть в воздухе
+			var dir := (b - a).normalized()
+			var nrm := Vector2(-dir.y, dir.x)
+			if nrm.dot(-q) < 0.0:
+				nrm = -nrm
+			best = {"a": a, "b": b, "pt": q, "off": nrm * TAPE_W * 0.35}
+	return best
+
+
 func _begin_stroke(pos: Vector2) -> void:
 	if active_tool == "" or paper_idx < 0:
 		return
 	var lp := pos - CENTER
-	if not Geometry2D.is_point_in_polygon(lp, _stroke_region()):
+	var snap := {}
+	if active_tool == "tape":
+		snap = _tape_snap_at(lp)
+	if snap.is_empty() and not Geometry2D.is_point_in_polygon(lp, _stroke_region()):
 		toast.emit("Only on the paper")
 		return
 	var count := tape_strokes.size() if active_tool == "tape" else ribbon_strokes.size()
@@ -1576,12 +1689,23 @@ func _begin_stroke(pos: Vector2) -> void:
 		return
 	stroking = true
 	stroke_kind = active_tool
+	tape_snap = snap
+	if not snap.is_empty():
+		lp = snap["pt"]
+		tape_snap["start"] = lp
 	stroke_pts = PackedVector2Array([lp])
 	AudioSynth.play_sfx("tape" if stroke_kind == "tape" else "ribbon")
 
 
 func _move_stroke(pos: Vector2) -> void:
 	if not stroking:
+		return
+	if not tape_snap.is_empty():
+		# скотч идёт строго вдоль края или шва за пальцем
+		var qa: Vector2 = tape_snap["a"]
+		var qb: Vector2 = tape_snap["b"]
+		var qo: Vector2 = tape_snap["off"]
+		stroke_pts = PackedVector2Array([(tape_snap["start"] as Vector2) + qo, Geometry2D.get_closest_point_to_segment(pos - CENTER, qa, qb) + qo])
 		return
 	var lp := pos - CENTER
 	if not Geometry2D.is_point_in_polygon(lp, _stroke_region()):
@@ -1601,9 +1725,23 @@ func _end_stroke() -> void:
 	if not stroking:
 		return
 	stroking = false
+	var snap := tape_snap
+	tape_snap = {}
 	var total := 0.0
 	for i in range(1, stroke_pts.size()):
 		total += stroke_pts[i - 1].distance_to(stroke_pts[i])
+	if not snap.is_empty() and total < 20.0:
+		# касание у края: полоска скотча вдоль него вокруг точки касания
+		var sa: Vector2 = snap["a"]
+		var sb: Vector2 = snap["b"]
+		var seg_len := sa.distance_to(sb)
+		var dir := (sb - sa).normalized()
+		var pos_t := ((snap["start"] as Vector2) - sa).dot(dir)
+		var t0 := clampf(pos_t - TAPE_TAP_LEN * 0.5, 0.0, maxf(seg_len - TAPE_TAP_LEN, 0.0))
+		var t1 := minf(t0 + TAPE_TAP_LEN, seg_len)
+		var so: Vector2 = snap["off"]
+		stroke_pts = PackedVector2Array([sa + dir * t0 + so, sa + dir * t1 + so])
+		total = t1 - t0
 	if total < 20.0:
 		stroke_pts = PackedVector2Array()
 		return
@@ -2463,6 +2601,13 @@ func _draw_gift() -> void:
 	for st in ribbon_strokes:
 		var rbs: Dictionary = Data.RIBBONS[int(st["ribbon"])]
 		_draw_ribbon_path(st["pts"], float(st["age"]), str(rbs["id"]))
+	if active_tool == "tape" and step == Step.WRAP and MAT_RECT.grow(20.0).has_point(mouse_pos):
+		# подсказка: край или шов, к которому прилипнет скотч
+		var tsn := _tape_snap_at(mouse_pos - CENTER) if not stroking else tape_snap
+		if not tsn.is_empty():
+			draw_line(tsn["a"], tsn["b"], Color(1, 0.93, 0.55, 0.5), 5.0)
+			if tsn.has("pt"):
+				draw_circle(tsn["pt"], 6.0 + sin(time * 6.0), Color(1, 0.93, 0.55, 0.9))
 	if active_tool == "ribbon" and ribbon_idx >= 0 and step == Step.WRAP:
 		var rbc: Dictionary = Data.RIBBONS[ribbon_idx]
 		if ribbon_anchored:

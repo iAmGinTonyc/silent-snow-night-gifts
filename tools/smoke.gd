@@ -127,7 +127,16 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 	var count := 4 if perfect else 1
 	var tops: Array = []
 	for i in count:
-		await fold_by(w, starts[i], ends[i])
+		if perfect and not skew and i == 0 and main.customer_idx % 2 == 0:
+			# касание клапана: он сам переваливается через ребро вещи
+			w.fold_drag_begin(w.CENTER + (starts[0] as Vector2).rotated(w.rot))
+			w.fold_drag_end()
+			await wait_idle(w)
+			if w.fold.fold_count() != 1:
+				print("   tap did not fold the flap, folds=", w.fold.fold_count())
+				failed = true
+		else:
+			await fold_by(w, starts[i], ends[i])
 		tops.append(w.fold.top_layer())
 	if w.fold.fold_count() != count + 0:
 		print("   expected ", count, " folds, got ", w.fold.fold_count())
@@ -153,6 +162,21 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 			return false
 		await create_timer(1.0).timeout
 		w._select_tool("tape")
+		# касание у края или шва клеит полоску скотча вдоль него
+		var edges: Array = w._tape_edges()
+		if not edges.is_empty() and w.active_tool == "tape":
+			var longest: Array = edges[0]
+			for e in edges:
+				var ea: Array = e
+				if (ea[0] as Vector2).distance_to(ea[1]) > (longest[0] as Vector2).distance_to(longest[1]):
+					longest = ea
+			var mid: Vector2 = ((longest[0] as Vector2) + (longest[1] as Vector2)) * 0.5
+			var before: int = w.tape_strokes.size()
+			w._begin_stroke(w.CENTER + mid)
+			w._end_stroke()
+			if w.tape_strokes.size() != before + 1:
+				print("   tap at an edge did not place tape")
+				failed = true
 		var x0: float = -w.item_w * 0.4
 		w._begin_stroke(w.CENTER + Vector2(x0, 0.0))
 		var xx: float = x0

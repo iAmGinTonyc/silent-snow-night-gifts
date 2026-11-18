@@ -32,6 +32,7 @@ func _initialize() -> void:
 	test_diagonal_corner()
 	test_topmost()
 	test_slanted_sheet()
+	test_edges_and_distance()
 	print("TEST_FOLD ", "OK" if fails == 0 else "FAILED", " (", checks, " checks, ", fails, " failed)")
 	quit(0 if fails == 0 else 1)
 
@@ -244,3 +245,21 @@ func test_slanted_sheet() -> void:
 	for g in f.facets:
 		check(Fold.area(Fold.poly(g)) > 0.5, "no empty facets")
 		check(Geometry2D.is_polygon_clockwise(g["flat"]) == Geometry2D.is_polygon_clockwise(g["flat"]), "polygon winding is readable")
+
+
+func test_edges_and_distance() -> void:
+	var f := Fold.new()
+	f.reset(rect(-100, -50, 100, 50))
+	var hull := rect(-30, -30, 30, 30)
+	var edges := f.visible_edges(hull)
+	check(edges.size() == 4, "a flat sheet shows its four outline edges (" + str(edges.size()) + ")")
+	f.fold(Vector2(-1, 0), 30.0)
+	f.fold(Vector2(1, 0), 30.0)
+	var after := f.visible_edges(hull)
+	check(after.size() >= 4, "folded parcel still has visible edges")
+	for e in after:
+		var s: Array = e
+		check(absf(s[0].x) <= 100.01 and absf(s[1].x) <= 100.01, "edges stay inside the sheet outline")
+	check(near(Fold.dist_to_poly(Vector2(0, 0), rect(-10, -10, 10, 10)), 0.0), "point inside has distance 0")
+	check(near(Fold.dist_to_poly(Vector2(15, 0), rect(-10, -10, 10, 10)), 5.0), "point outside: distance to the nearest edge")
+	check(Fold.centroid(rect(0, 0, 10, 20)).distance_to(Vector2(5, 10)) < 0.01, "centroid of a rectangle")

@@ -79,6 +79,36 @@ func scenario(which: String) -> void:
 	var hh: float = w._across() * 0.5
 	var fh: float = w._flap_len()
 	await shot(which + "_0_cut")
+	if which.begins_with("tap"):
+		# касания: клапаны сами переваливаются через рёбра вещи; потом скотч по касанию у шва
+		var offs: Array = [Vector2(-hw - fh * 0.5, 20.0), Vector2(hw + fh * 0.5, -20.0), Vector2(30.0, -hh - 14.0), Vector2(-30.0, hh + 14.0)]
+		for k in 4:
+			var pp: Vector2 = offs[k]
+			# палец чуть мимо бумаги: клапан берётся по ближайшему
+			w.fold_drag_begin(pt(w, pp + Vector2(0.0, 0.0)))
+			w.fold_drag_end()
+			await idle(w)
+			await shot(which + "_a" + str(k))
+		await create_timer(1.0).timeout
+		w._select_tool("tape")
+		var edges: Array = w._tape_edges()
+		if edges.is_empty():
+			print(which, " folds=", w.fold.fold_count(), " tucked=", w.tucked, " (no tape edges: sack)")
+			return
+		var longest: Array = edges[0]
+		for e in edges:
+			var ea: Array = e
+			if (ea[0] as Vector2).distance_to(ea[1]) > (longest[0] as Vector2).distance_to(longest[1]):
+				longest = ea
+		var mid: Vector2 = ((longest[0] as Vector2) + (longest[1] as Vector2)) * 0.5
+		w.mouse_pos = w.CENTER + mid + Vector2(8.0, 6.0)
+		await shot(which + "_b_tape_guide")
+		w._begin_stroke(w.CENTER + mid + Vector2(8.0, 6.0))
+		w._end_stroke()
+		await create_timer(0.5).timeout
+		await shot(which + "_c_taped")
+		print(which, " folds=", w.fold.fold_count(), " tape=", w.tape_strokes.size(), " tucked=", w.tucked)
+		return
 	if which.begins_with("diag"):
 		var ys: float = hh + w.MARGIN
 		var corner: Vector2 = w._sheet_poly()[0] + Vector2(16.0, 16.0)

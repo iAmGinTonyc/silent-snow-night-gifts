@@ -331,3 +331,52 @@ static func _copy(src: Array) -> Array:
 	for f in src:
 		out.append({"flat": (f["flat"] as PackedVector2Array).duplicate(), "xf": f["xf"], "layer": f["layer"], "creases": (f["creases"] as Array).duplicate(true)})
 	return out
+
+
+## Расстояние от точки до многоугольника (0, если точка внутри).
+static func dist_to_poly(p: Vector2, poly: PackedVector2Array) -> float:
+	if Geometry2D.is_point_in_polygon(p, poly):
+		return 0.0
+	var best := INF
+	for i in poly.size():
+		var q := Geometry2D.get_closest_point_to_segment(p, poly[i], poly[(i + 1) % poly.size()])
+		best = minf(best, p.distance_to(q))
+	return best
+
+
+static func centroid(poly: PackedVector2Array) -> Vector2:
+	var c := Vector2.ZERO
+	for v in poly:
+		c += v
+	return c / float(maxi(poly.size(), 1))
+
+
+## Края и швы, которые видны сверху: стороны многоугольников граней, возле которых сверху лежит та же грань.
+## Края слоя 0 под вещью (внутри hull) не видны. Возвращает отрезки [a, b] в координатах стола без повторов.
+func visible_edges(hull: PackedVector2Array) -> Array:
+	var out: Array = []
+	for fi in facets.size():
+		var f: Dictionary = facets[fi]
+		var p := poly(f)
+		var cen := centroid(p)
+		for i in p.size():
+			var a := p[i]
+			var b := p[(i + 1) % p.size()]
+			if a.distance_to(b) < 8.0:
+				continue
+			var mid := (a + b) * 0.5
+			var probe := mid + (cen - mid).normalized() * 2.5
+			var top := topmost_at(probe)
+			if top.is_empty() or int(top["idx"]) != fi:
+				continue
+			if int(f["layer"]) == 0 and hull.size() >= 3 and Geometry2D.is_point_in_polygon(probe, hull):
+				continue
+			var dup := false
+			for e in out:
+				var s: Array = e
+				if (a.distance_to(s[0]) < 2.0 and b.distance_to(s[1]) < 2.0) or (a.distance_to(s[1]) < 2.0 and b.distance_to(s[0]) < 2.0):
+					dup = true
+					break
+			if not dup:
+				out.append([a, b])
+	return out
