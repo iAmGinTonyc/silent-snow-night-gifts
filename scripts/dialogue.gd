@@ -40,6 +40,12 @@ func _ready() -> void:
 	root.visible = false
 	root.gui_input.connect(_on_gui_input)
 	add_child(root)
+	# реплику листает нажатие в любом месте экрана, и на краях за рамкой 1280x720
+	var catcher := Control.new()
+	catcher.position = U.COVER.position
+	catcher.size = U.COVER.size
+	catcher.gui_input.connect(_on_gui_input)
+	root.add_child(catcher)
 	box = UI.panel(Vector2(110, 520), Vector2(1060, 172), Color(0.10, 0.07, 0.11, 0.95), 4, 24)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE   # клики должны доходить до root, а не гаснуть на панели
 	root.add_child(box)

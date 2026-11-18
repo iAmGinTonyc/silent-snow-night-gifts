@@ -23,6 +23,11 @@ const T_JARS: Array[Texture2D] = [
 	preload("res://art/shop/jar_15.png"),
 ]
 const T_SHELF_VIEW := preload("res://art/shop/shelf_closeup.jpg")
+## Расширенные версии для широких и высоких экранов: прилавок от -213 до 1493 и вниз до 840, полка от -240 до 1520.
+var t_counter_ext: Texture2D = U.tex_or("res://art/shop/order_counter_ext.png", null)
+var t_shelf_ext: Texture2D = U.tex_or("res://art/shop/shelf_closeup_ext.jpg", null)
+const COUNTER_EXT := Rect2(-213.333, 482.7, 1706.667, 357.3)
+const SHELF_EXT := Rect2(-240.0, 86.0, 1760.0, 754.0)
 const T_MUG := preload("res://art/shop/mug.png")
 const T_FRAME := preload("res://art/shop/frame.png")
 const T_ITEMS := {
@@ -531,7 +536,10 @@ func _txt(pos: Vector2, text: String, size: int, col: Color, outline: bool = tru
 
 
 func _draw_counter() -> void:
-	draw_texture_rect(T_COUNTER, Rect2(0.0, COUNTER_TEX_Y, 1280.0, COUNTER_TEX_H), false)
+	if t_counter_ext:
+		draw_texture_rect(t_counter_ext, COUNTER_EXT, false)
+	else:
+		draw_texture_rect(T_COUNTER, Rect2(0.0, COUNTER_TEX_Y, 1280.0, COUNTER_TEX_H), false)
 
 
 func _draw_props() -> void:
@@ -871,7 +879,10 @@ func _draw_shelf_view() -> void:
 	if shelf_t <= 0.0:
 		return
 	var e := U.ease_out_back(shelf_t)
-	draw_texture_rect(T_SHELF_VIEW, SHELF_VIEW, false, Color(1, 1, 1, clampf(shelf_t * 1.6, 0.0, 1.0)))
+	if t_shelf_ext:
+		draw_texture_rect(t_shelf_ext, SHELF_EXT, false, Color(1, 1, 1, clampf(shelf_t * 1.6, 0.0, 1.0)))
+	else:
+		draw_texture_rect(T_SHELF_VIEW, SHELF_VIEW, false, Color(1, 1, 1, clampf(shelf_t * 1.6, 0.0, 1.0)))
 	draw_rect(Rect2(SHELF_VIEW.position, Vector2(SHELF_VIEW.size.x, 4.0)), Color(0, 0, 0, 0.35 * shelf_t))
 	var sign_c := Vector2(640.0, 180.0)
 	_txt(sign_c + Vector2(-150.0, 10.0), "Pick a gift", 30, Color("#3a2418"), false, HORIZONTAL_ALIGNMENT_CENTER, 300.0)

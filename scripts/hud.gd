@@ -230,8 +230,8 @@ func _make_overlay_root(dim_alpha: float) -> Control:
 	r.size = Vector2(1280, 720)
 	var dim := ColorRect.new()
 	dim.color = Color(0.03, 0.03, 0.08, dim_alpha)
-	dim.position = Vector2.ZERO
-	dim.size = Vector2(1280, 720)
+	dim.position = U.COVER.position   # на весь экран, даже если он шире или выше рамки
+	dim.size = U.COVER.size
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.add_child(dim)
 	return r
@@ -242,12 +242,25 @@ func _build_start() -> void:
 	start_root.size = Vector2(1280, 720)
 	start_root.gui_input.connect(_on_start_input)
 	add_child(start_root)
+	# нажатие в любом месте экрана, и на краях за рамкой 1280x720
+	var catcher := Control.new()
+	catcher.position = U.COVER.position
+	catcher.size = U.COVER.size
+	catcher.gui_input.connect(_on_start_input)
+	start_root.add_child(catcher)
 	var pic := TextureRect.new()
 	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	pic.texture = load("res://art/ui/menu.jpg")
-	pic.size = Vector2(1280, 720)
-	pic.pivot_offset = Vector2(640, 430)
+	var menu_ext: Texture2D = U.tex_or("res://art/ui/menu_ext.jpg", null)
+	if menu_ext:
+		pic.texture = menu_ext   # картинка меню с запасом на широкий и высокий экран
+		pic.position = U.EXT.position
+		pic.size = U.EXT.size
+		pic.pivot_offset = Vector2(640, 430) - U.EXT.position
+	else:
+		pic.texture = load("res://art/ui/menu.jpg")
+		pic.size = Vector2(1280, 720)
+		pic.pivot_offset = Vector2(640, 430)
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	start_root.add_child(pic)
 	var zoom := create_tween().set_loops()
@@ -255,8 +268,9 @@ func _build_start() -> void:
 	zoom.tween_property(pic, "scale", Vector2.ONE, 10.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	# тёмная полоса сверху под заголовок и лёгкое затемнение снизу
 	var g := Gradient.new()
-	g.offsets = PackedFloat32Array([0.0, 0.34, 0.75, 1.0])
-	g.colors = PackedColorArray([Color(0.02, 0.02, 0.07, 0.9), Color(0.02, 0.02, 0.07, 0.0), Color(0.02, 0.02, 0.07, 0.0), Color(0.02, 0.02, 0.07, 0.6)])
+	# полоса тянется на 150 px выше и ниже рамки: на высоком экране тёмный верх и низ не обрываются
+	g.offsets = PackedFloat32Array([0.0, 0.147, 0.387, 0.676, 0.853, 1.0])
+	g.colors = PackedColorArray([Color(0.02, 0.02, 0.07, 0.95), Color(0.02, 0.02, 0.07, 0.9), Color(0.02, 0.02, 0.07, 0.0), Color(0.02, 0.02, 0.07, 0.0), Color(0.02, 0.02, 0.07, 0.6), Color(0.02, 0.02, 0.07, 0.7)])
 	var gt := GradientTexture2D.new()
 	gt.gradient = g
 	gt.fill_from = Vector2(0, 0)
@@ -265,7 +279,8 @@ func _build_start() -> void:
 	gt.height = 256
 	var shade := TextureRect.new()
 	shade.texture = gt
-	shade.size = Vector2(1280, 720)
+	shade.position = Vector2(-640, -150)
+	shade.size = Vector2(2560, 1020)
 	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	shade.stretch_mode = TextureRect.STRETCH_SCALE
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -291,12 +306,12 @@ func _build_start() -> void:
 ## Мягкий снегопад поверх картинки меню.
 func _make_snow() -> CPUParticles2D:
 	var sn := CPUParticles2D.new()
-	sn.position = Vector2(640, -12)
-	sn.amount = 90
+	sn.position = Vector2(640, -140)
+	sn.amount = 140
 	sn.lifetime = 9.0
 	sn.preprocess = 9.0
 	sn.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	sn.emission_rect_extents = Vector2(660, 4)
+	sn.emission_rect_extents = Vector2(1000, 4)
 	sn.direction = Vector2(0.12, 1.0)
 	sn.spread = 14.0
 	sn.gravity = Vector2.ZERO

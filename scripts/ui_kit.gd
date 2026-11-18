@@ -82,8 +82,8 @@ static func overlay(dim_alpha: float) -> Control:
 	r.size = Vector2(1280, 720)
 	var dim := ColorRect.new()
 	dim.color = Color(0.03, 0.03, 0.08, dim_alpha)
-	dim.position = Vector2.ZERO
-	dim.size = Vector2(1280, 720)
+	dim.position = Vector2(-640, -400)   # с запасом: экран бывает шире или выше рамки 1280x720
+	dim.size = Vector2(2560, 1520)
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.add_child(dim)
 	return r

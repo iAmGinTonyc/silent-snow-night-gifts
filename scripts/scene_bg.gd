@@ -6,6 +6,7 @@ extends Node2D
 const U = preload("res://scripts/util.gd")
 
 const T_BACK := preload("res://art/shop/order_back.jpg")
+var t_back_ext: Texture2D = U.tex_or("res://art/shop/order_back_ext.jpg", null)   # комната с запасом по краям
 const WIN := Rect2(410, 145, 276, 153)   # стекло окна на плите комнаты, сюда падает снег
 const LAMP := Vector2(640, 250)
 const COUNTER_Y := 540.0
@@ -119,7 +120,7 @@ func _draw_front(with_glow: bool) -> void:
 		var breathe := 0.94 + 0.06 * sin(time * 1.7)
 		draw_texture_rect(glow_tex, Rect2(LAMP - Vector2(560, 440), Vector2(1120, 880)), false, Color(1, 1, 1, breathe))
 		draw_texture_rect(glow_tex, Rect2(LAMP - Vector2(220, 180), Vector2(440, 360)), false, Color(1, 0.95, 0.8, 0.45 * breathe))
-	draw_texture_rect(vignette_tex, Rect2(0, 0, 1280, 720), false)
+	draw_texture_rect(vignette_tex, U.view_rect(self), false)
 	for fw in fireworks:
 		var t: float = fw["t"]
 		var col: Color = fw["col"]
@@ -140,7 +141,10 @@ func _draw_front(with_glow: bool) -> void:
 
 func _draw_back() -> void:
 	# комната нарисована целиком (плита), здесь только то, что живёт: снег за окном и вспышка салюта
-	draw_texture_rect(T_BACK, Rect2(0, 0, 1280, 720), false)
+	if t_back_ext:
+		draw_texture_rect(t_back_ext, U.EXT, false)
+	else:
+		draw_texture_rect(T_BACK, Rect2(0, 0, 1280, 720), false)
 	for f in flakes:
 		var fy: float = f["y"]
 		var fa := 0.9 * minf((fy - WIN.position.y) / 12.0, 1.0)

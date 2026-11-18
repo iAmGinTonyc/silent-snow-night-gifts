@@ -2,6 +2,7 @@ extends Node2D
 ## Поток игры: два экрана (заказ и упаковка), терпение клиента, деньги и лавка, вечера и финал.
 
 const Data = preload("res://scripts/data.gd")
+const UTIL = preload("res://scripts/util.gd")
 const SceneBg = preload("res://scripts/scene_bg.gd")
 const CustomerView = preload("res://scripts/customer_view.gd")
 const OrderCounter = preload("res://scripts/order_counter.gd")
@@ -94,6 +95,15 @@ func _ready() -> void:
 	wrap_root = Node2D.new()
 	wrap_root.visible = false
 	add_child(wrap_root)
+	# стол для упаковки с запасом по краям: лежит под экраном упаковки, в рамке 1280x720 совпадает с ним
+	var wrap_ext: Texture2D = UTIL.tex_or("res://art/wrap/wrap_back_ext.jpg", null)
+	if wrap_ext:
+		var sp := Sprite2D.new()
+		sp.texture = wrap_ext
+		sp.centered = false
+		sp.position = UTIL.EXT.position
+		sp.scale = UTIL.EXT.size / wrap_ext.get_size()
+		wrap_root.add_child(sp)
 	wrap = WrapScreen.new()
 	wrap_root.add_child(wrap)
 	var wrap_light := SceneBg.new()
@@ -136,6 +146,8 @@ func _ready() -> void:
 
 	_apply_inventory()
 	status.set_money(econ.balance, false)
+	get_viewport().size_changed.connect(_fit_screen)
+	_fit_screen()
 	var ev: Dictionary = Data.EVENINGS[0]
 	bg.sky_color = Color.html(ev["sky"])
 	bg.sky_target = bg.sky_color
@@ -149,6 +161,17 @@ func _ready() -> void:
 
 
 var _click_flag := false
+
+
+## Экран шире или выше 16:9 (растяжение expand): рамка 1280x720 встаёт по центру, все слои сдвигаются вместе с ней,
+## а расширенные фоны заполняют края. Ввод везде считается через get_global_mouse_position, поэтому сдвиг ему не мешает.
+func _fit_screen() -> void:
+	var vis := get_viewport().get_visible_rect().size
+	var off := ((vis - UTIL.BASE) * 0.5).round()
+	get_viewport().canvas_transform = Transform2D(0.0, off)
+	for ch in get_children():
+		if ch is CanvasLayer:
+			(ch as CanvasLayer).offset = off
 
 
 func _unhandled_input(event: InputEvent) -> void:

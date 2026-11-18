@@ -400,11 +400,14 @@ const engine = new Engine(GODOT_CONFIG);
 	const fill = document.getElementById('loader-fill');
 	const text = document.getElementById('loader-text');
 
-	// --- Игра 16:9 по центру, по краям рисунки ---
+	// --- Игра на весь экран ---
 	// Движок сам холст не растягивает (canvas_resize_policy = 0 в export_presets.cfg): размер в пикселях
 	// и место на странице задаём здесь, движок каждый кадр сверяется с canvas.width/height.
+	// Игра растягивается (stretch aspect = expand) и дорисована от 4:3 (планшеты) до ~21:9 (вытянутые телефоны):
+	// в этих пределах холст занимает весь экран. Только за ними остаются поля с рисунками по краям.
 	// Плотность пикселей не выше 2, чтобы телефонам с плотностью 3 не рисовать лишнее.
-	const GAME_RATIO = 1280 / 720;
+	const MIN_RATIO = 1280 / 960;
+	const MAX_RATIO = 1706 / 720;
 	const MAX_DPR = 2;
 	const canvasEl = document.getElementById('canvas');
 	const edges = {
@@ -428,11 +431,12 @@ const engine = new Engine(GODOT_CONFIG);
 		const vw = window.innerWidth;
 		const vh = window.innerHeight;
 		const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+		const ratio = Math.min(MAX_RATIO, Math.max(MIN_RATIO, vw / vh));
 		let w = vw;
-		let h = vw / GAME_RATIO;
+		let h = vw / ratio;
 		if (h > vh) {
 			h = vh;
-			w = vh * GAME_RATIO;
+			w = vh * ratio;
 		}
 		const pw = Math.max(1, Math.round(w * dpr));
 		const ph = Math.max(1, Math.round(h * dpr));

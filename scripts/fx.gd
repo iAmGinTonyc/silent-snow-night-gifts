@@ -24,8 +24,12 @@ const IRIS_SHADER := """
 shader_type canvas_item;
 uniform float radius = 1.1;
 uniform vec2 center = vec2(0.5, 0.5);
+uniform vec2 rect_pos = vec2(-640.0, -400.0);
+uniform vec2 rect_size = vec2(2560.0, 1520.0);
 void fragment() {
-	vec2 p = (UV - center) * vec2(1.7778, 1.0);
+	// center задан долей рамки 1280x720, расстояние в высотах рамки (как раньше)
+	vec2 px = rect_pos + UV * rect_size;
+	vec2 p = (px - center * vec2(1280.0, 720.0)) / 720.0;
 	float d = length(p);
 	COLOR = vec4(0.05, 0.03, 0.05, step(radius, d));
 }
@@ -46,8 +50,8 @@ func _ready() -> void:
 
 func _make_rect(code: String) -> ColorRect:
 	var r := ColorRect.new()
-	r.position = Vector2.ZERO
-	r.size = Vector2(1280, 720)
+	r.position = Vector2(-640, -400)   # с запасом на широкий и высокий экран
+	r.size = Vector2(2560, 1520)
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sh := Shader.new()
 	sh.code = code
@@ -63,10 +67,10 @@ func _set_radius(v: float) -> void:
 
 func iris_out(dur: float = 0.38, center: Vector2 = Vector2(0.5, 0.5)) -> void:
 	iris.material.set_shader_parameter("center", center)
-	_set_radius(1.1)
+	_set_radius(1.7)
 	iris.visible = true
 	var tw := create_tween()
-	tw.tween_method(_set_radius, 1.1, 0.0, dur).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_method(_set_radius, 1.7, 0.0, dur).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
 	await tw.finished
 
 
@@ -75,6 +79,6 @@ func iris_in(dur: float = 0.38, center: Vector2 = Vector2(0.5, 0.5)) -> void:
 	_set_radius(0.0)
 	iris.visible = true
 	var tw := create_tween()
-	tw.tween_method(_set_radius, 0.0, 1.1, dur).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	tw.tween_method(_set_radius, 0.0, 1.7, dur).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
 	await tw.finished
 	iris.visible = false
