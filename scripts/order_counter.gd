@@ -5,6 +5,7 @@ extends Node2D
 
 signal item_given
 signal offer_pressed(item_id: String)
+signal shelf_toggled(open: bool)
 
 const Data = preload("res://scripts/data.gd")
 const U = preload("res://scripts/util.gd")
@@ -13,8 +14,7 @@ const Shapes = preload("res://scripts/shapes.gd")
 const T_COUNTER := preload("res://art/shop/order_counter.png")
 const T_REGISTER := preload("res://art/shop/register.png")
 const T_JAR := preload("res://art/shop/jar.png")
-const T_CALENDAR := preload("res://art/shop/calendar.png")
-const T_STAND := preload("res://art/shop/stand.png")
+const T_SHELF_VIEW := preload("res://art/shop/shelf_closeup.jpg")
 const T_MUG := preload("res://art/shop/mug.png")
 const T_FRAME := preload("res://art/shop/frame.png")
 const T_PHOTOS := preload("res://art/shop/photos.png")
@@ -23,6 +23,10 @@ const T_ITEMS := {
 	"ornament": preload("res://art/shop/item_ornament.png"),
 	"ball": preload("res://art/shop/item_ball.png"),
 	"train": preload("res://art/shop/item_train.png"),
+	"bear_mid": preload("res://art/shop/item_bear_mid.png"),
+	"ornament_mid": preload("res://art/shop/item_ornament_mid.png"),
+	"ball_mid": preload("res://art/shop/item_ball_mid.png"),
+	"train_mid": preload("res://art/shop/item_train_mid.png"),
 }
 
 # Прилавок: плита начинается на этой высоте, всё что выше (клиент, комната) рисуется раньше
@@ -35,33 +39,41 @@ const REG_H := 262.0
 const JAR_POS := Vector2(300, 580)
 const JAR_H := 160.0
 const JAR_SLOT := Vector2(300, 432)
-const CAL_POS := Vector2(440, 575)
-const CAL_H := 150.0
-const STAND_POS := Vector2(760, 590)
-const STAND_H := 250.0
 const CAT_POS := Vector2(990, 590)
 const CAT_SCALE := 1.0 / 1.5   # кадры кота хранятся в полуторном размере
 const MUG_POS := Vector2(1075, 565)
 const MUG_H := 82.0
-const FRAME_POS := Vector2(1170, 596)
+const FRAME_POS := Vector2(1160, 590)
 const FRAME_H := 190.0
-const PHOTOS_POS := Vector2(1215, 640)
+const PHOTOS_POS := Vector2(1206, 610)
 const PHOTOS_H := 62.0
 
-# Полка со ступенями: куда ставится каждый товар (по порядку Data.STOCK) и его размер
-const SHELF_POS := [Vector2(765, 408), Vector2(715, 468), Vector2(805, 468), Vector2(760, 528)]
-const SHELF_SIZE := {"bear": Vector2(70, 84), "ornament": Vector2(54, 73), "ball": Vector2(92, 56), "train": Vector2(116, 46)}
+# Размер спрайта товара на прилавке (для подарка, который летит к клиенту)
+const SHELF_SIZE := {"bear": Vector2(70, 84), "ornament": Vector2(54, 73), "ball": Vector2(74, 76), "train": Vector2(118, 40)}
 
+# Полка на правой стене комнаты (на плите комнаты): клик открывает полку крупным планом
+const WALL_SHELF := Rect2(1092, 78, 188, 392)
+# Полка крупным планом: картинка под вывесками и место каждой игрушки. Простые игрушки (Data.STOCK) стоят
+# на верхней доске, дорогие (Data.STOCK_MID) на нижней, один вид в одной колонке; точка — низ спрайта по центру
+const SHELF_VIEW := Rect2(0, 86, 1280, 634)
+const SHELF_SLOTS := {
+	"bear": Vector2(170, 388), "ornament": Vector2(400, 388), "ball": Vector2(620, 388), "train": Vector2(950, 388),
+	"bear_mid": Vector2(190, 611), "ornament_mid": Vector2(440, 611), "ball_mid": Vector2(700, 611), "train_mid": Vector2(990, 611),
+}
+const SHELF_BUBBLE_X := 790.0   # пока полка открыта, мысли клиента сдвигаются вправо и ничего не закрывают
+const SHELF_VIEW_SCALE := 1.6
+const BACK_BTN := Rect2(34, 650, 170, 48)
 const CUSTOMER_HAND := Vector2(520, 470)
 const GIFT_POS := Vector2(565, 548)
-const MOUTH := Vector2(545, 345)
+const MOUTH := Vector2(555, 300)
 
 # Вывески сверху и две плашки внизу (вставки для текста)
 const TOP_PLAQUES := [Rect2(112, 12, 246, 64), Rect2(386, 12, 248, 64), Rect2(660, 12, 246, 64), Rect2(932, 12, 248, 64)]
 const INSET_DAYS := Rect2(403, 642, 203, 54)
 const INSET_MONEY := Rect2(735, 642, 204, 55)
 
-const BUBBLE_X := 600.0
+const BUBBLE_X := 640.0
+const BUBBLE_PAD := 40.0   # поля текста внутри облачка
 const BUBBLE_W := 480.0
 const BUBBLE_FONT := 25
 const BUBBLE_TOP := 92.0
@@ -77,7 +89,14 @@ var bubble_kind := "speech"   # speech или thought (мысли клиента
 var bubble_name := ""
 var bubble_t := 1.0
 var offer_enabled := false
-var shelf_hover := -1
+var shelf_hover_id := ""      # какая игрушка под мышью на полке крупным планом
+var stock_counts: Dictionary = {}   # {item_id: сколько штук}; пока set_stock не вызывали, запас не ограничен
+var stock_set := false
+var shelf_open := false       # открыта полка крупным планом
+var shelf_t := 0.0            # 0..1, плавное открытие
+var wall_hover := false       # мышь над полкой на стене
+var back_hover := false
+var glow_style: StyleBoxFlat
 var tips_shown := 0
 var info: Dictionary = {}
 var fly_coins: Array = []
@@ -115,6 +134,11 @@ func _ready() -> void:
 	thought_style.set_corner_radius_all(44)
 	thought_style.shadow_color = Color(0, 0, 0, 0.3)
 	thought_style.shadow_size = 8
+	glow_style = StyleBoxFlat.new()
+	glow_style.bg_color = Color(1.0, 0.9, 0.5, 0.12)
+	glow_style.border_color = Color(1.0, 0.9, 0.5, 0.9)
+	glow_style.set_border_width_all(3)
+	glow_style.set_corner_radius_all(14)
 
 
 # --- Публичное API -----------------------------------------------------------
@@ -129,7 +153,10 @@ func show_thought(person: String, text: String) -> void:
 
 func set_offer(on: bool) -> void:
 	offer_enabled = on
-	shelf_hover = -1
+	shelf_hover_id = ""
+	wall_hover = false
+	if not on:
+		shelf_open = false
 
 
 func show_bubble(person: String, text: String) -> void:
@@ -186,6 +213,7 @@ func clear_gift() -> void:
 func reset() -> void:
 	bubble_text = ""
 	offer_enabled = false
+	shelf_open = false
 	give = {}
 	gift_look = {}
 	fly_coins.clear()
@@ -215,18 +243,70 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		var p := get_global_mouse_position()
+		if shelf_open:
+			shelf_hover_id = _shelf_view_at(p)
+			back_hover = BACK_BTN.has_point(p)
+			Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (shelf_hover_id != "" or back_hover) else Input.CURSOR_ARROW)
+			return
 		var over_cat := _cat_rect().has_point(p)
-		shelf_hover = _shelf_at(p) if offer_enabled else -1
-		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (over_cat or shelf_hover >= 0) else Input.CURSOR_ARROW)
+		wall_hover = offer_enabled and WALL_SHELF.has_point(p)
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (over_cat or wall_hover) else Input.CURSOR_ARROW)
+	elif event is InputEventKey:
+		var ke := event as InputEventKey
+		if ke.pressed and ke.keycode == KEY_ESCAPE and shelf_open:
+			_close_shelf()
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-			var p2 := get_global_mouse_position()
-			if offer_enabled and _shelf_at(p2) >= 0:
-				AudioSynth.play_sfx("click")
-				offer_pressed.emit(str(Data.STOCK[_shelf_at(p2)]))
+		if not mb.pressed:
+			return
+		var p2 := get_global_mouse_position()
+		if shelf_open:
+			if mb.button_index == MOUSE_BUTTON_RIGHT:
+				_close_shelf()
+			elif mb.button_index == MOUSE_BUTTON_LEFT:
+				var picked := _shelf_view_at(p2)
+				if picked != "":
+					AudioSynth.play_sfx("click")
+					shelf_open = false
+					shelf_hover_id = ""
+					offer_pressed.emit(picked)
+				elif BACK_BTN.has_point(p2):
+					_close_shelf()
+			return
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if offer_enabled and WALL_SHELF.has_point(p2):
+				_open_shelf()
 			elif _cat_rect().has_point(p2):
 				_pet_cat()
+
+
+func _open_shelf() -> void:
+	shelf_open = true
+	shelf_hover_id = ""
+	back_hover = false
+	AudioSynth.play_sfx("click")
+	shelf_toggled.emit(true)
+
+
+func _close_shelf() -> void:
+	shelf_open = false
+	shelf_hover_id = ""
+	back_hover = false
+	AudioSynth.play_sfx("click")
+	shelf_toggled.emit(false)
+
+
+## Какая рука-курсор нужна над точкой p (см. hand_cursor.gd).
+func cursor_pose(p: Vector2) -> String:
+	if not input_enabled:
+		return "point"
+	if shelf_open:
+		return "hover" if (_shelf_view_at(p) != "" or BACK_BTN.has_point(p)) else "point"
+	if _cat_rect().has_point(p):
+		return "pet"
+	if offer_enabled and WALL_SHELF.has_point(p):
+		return "hover"
+	return "point"
 
 
 func _pet_cat() -> void:
@@ -279,6 +359,7 @@ func _process(delta: float) -> void:
 	purr_cd = maxf(purr_cd - delta, 0.0)
 	jar_bump = maxf(jar_bump - delta * 2.5, 0.0)
 	reg_pop = maxf(reg_pop - delta * 2.2, 0.0)
+	shelf_t = move_toward(shelf_t, 1.0 if shelf_open else 0.0, delta / 0.22)
 	_update_cat(delta)
 	for i in range(hearts.size() - 1, -1, -1):
 		hearts[i]["t"] += delta / 1.2
@@ -305,11 +386,12 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	_draw_counter()
 	_draw_props()
-	_draw_shelf()
 	_draw_cat()
+	_draw_wall_shelf_hint()
 	_draw_plaques()
 	_draw_gift()
 	_draw_give()
+	_draw_shelf_view()
 	_draw_bubble()
 	_draw_coins_and_hearts()
 
@@ -346,15 +428,6 @@ func _draw_props() -> void:
 		U.fill_stroke(self, U.ellipse(p, 7.5, 4.2), Color("#e3b84b"), 2.0, time, 0.4)
 		draw_circle(p + Vector2(-2.0, -1.0), 1.4, Color(1, 0.95, 0.6, 0.85))
 	_prop(T_JAR, JAR_POS, JAR_H, 1.0, -bump)
-	# настольный календарь с сегодняшней датой
-	_prop(T_CALENDAR, CAL_POS, CAL_H)
-	var day := str(info.get("day", ""))
-	if day != "":
-		draw_set_transform(Vector2(426.0, 528.0), -0.12, Vector2.ONE)
-		draw_string(font, Vector2(-30.0, 0.0), day, HORIZONTAL_ALIGNMENT_CENTER, 60.0, 38, U.INK)
-		draw_string(font, Vector2(-30.0, 20.0), str(info.get("month", "")), HORIZONTAL_ALIGNMENT_CENTER, 60.0, 16, Color("#8a4a3a"))
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	_prop(T_STAND, STAND_POS, STAND_H)
 	_prop(T_MUG, MUG_POS, MUG_H)
 	_prop(T_FRAME, FRAME_POS, FRAME_H)
 	_prop(T_PHOTOS, PHOTOS_POS, PHOTOS_H)
@@ -457,9 +530,9 @@ func _draw_coins_and_hearts() -> void:
 func _draw_bubble() -> void:
 	if bubble_text == "":
 		return
-	var tsize := font.get_multiline_string_size(bubble_text, HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 56.0, BUBBLE_FONT)
-	var h := tsize.y + 66.0
-	var rect := Rect2(BUBBLE_X, BUBBLE_TOP, BUBBLE_W, h)
+	var tsize := font.get_multiline_string_size(bubble_text, HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 2.0 * BUBBLE_PAD, BUBBLE_FONT)
+	var h := tsize.y + 84.0
+	var rect := Rect2(lerpf(BUBBLE_X, SHELF_BUBBLE_X, shelf_t), BUBBLE_TOP, BUBBLE_W, h)
 	var s := maxf(U.ease_out_elastic(bubble_t), 0.001)
 	var pivot := Vector2(rect.position.x, rect.end.y)
 	draw_set_transform(pivot * (1.0 - s), 0.0, Vector2(s, s))
@@ -475,13 +548,13 @@ func _draw_bubble() -> void:
 			draw_colored_polygon(U.star(sp, 7.0, 2.6, 4, time + float(k)), Color(0.7, 0.8, 1.0, 0.6 + 0.4 * sin(time * 4.0 + float(k))))
 	else:
 		draw_style_box(bubble_style, rect)
-		var tail := PackedVector2Array([Vector2(rect.position.x + 20.0, rect.end.y - 64.0), Vector2(rect.position.x + 20.0, rect.end.y - 14.0), MOUTH])
+		var tail := PackedVector2Array([Vector2(rect.position.x + 30.0, rect.end.y - 60.0), Vector2(rect.position.x + 30.0, rect.end.y - 16.0), MOUTH])
 		draw_colored_polygon(tail, BUBBLE_COLOR)
 		draw_polyline(PackedVector2Array([tail[0], tail[2], tail[1]]), U.INK, 4.0, true)
-		draw_rect(Rect2(rect.position.x + 17.0, rect.end.y - 62.0, 6.0, 46.0), BUBBLE_COLOR)
-	draw_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 34.0), bubble_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.62, 0.38, 0.26) if bubble_kind == "speech" else Color(0.32, 0.4, 0.62))
-	draw_multiline_string(font, Vector2(rect.position.x + 28.0, rect.position.y + 44.0 + font.get_ascent(BUBBLE_FONT)), bubble_text,
-		HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 56.0, BUBBLE_FONT, -1, U.INK)
+		draw_rect(Rect2(rect.position.x + 27.0, rect.end.y - 58.0, 6.0, 40.0), BUBBLE_COLOR)
+	draw_string(font, Vector2(rect.position.x + BUBBLE_PAD, rect.position.y + 40.0), bubble_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.62, 0.38, 0.26) if bubble_kind == "speech" else Color(0.32, 0.4, 0.62))
+	draw_multiline_string(font, Vector2(rect.position.x + BUBBLE_PAD, rect.position.y + 52.0 + font.get_ascent(BUBBLE_FONT)), bubble_text,
+		HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 2.0 * BUBBLE_PAD, BUBBLE_FONT, -1, U.INK)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -497,7 +570,7 @@ func _draw_give() -> void:
 	var e := U.ease_in_out(t)
 	var pos := a.lerp(b, e) + Vector2(0.0, -sin(e * PI) * 90.0)
 	var s := 1.0 + 0.1 * sin(e * PI)
-	var sz: Vector2 = SHELF_SIZE[id]
+	var sz := _item_size(id)
 	draw_texture_rect(T_ITEMS[id], Rect2(pos - sz * s * 0.5, sz * s), false)
 
 
@@ -552,36 +625,106 @@ func _draw_gift() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-# --- Полка «в наличии» ----------------------------------------------------------
+# --- Полка «в наличии» --------------------------------------------------------------
 
-func _shelf_rect(i: int) -> Rect2:
-	var id := str(Data.STOCK[i])
-	var sz: Vector2 = SHELF_SIZE[id]
-	var p: Vector2 = SHELF_POS[i]
-	return Rect2(p.x - sz.x * 0.5, p.y - sz.y, sz.x, sz.y).grow(8.0)
+## Подсказка на полке справа на стене, пока клиент ждёт подарок: мягкое свечение, при наведении подпись.
+func _draw_wall_shelf_hint() -> void:
+	if not offer_enabled or shelf_open:
+		return
+	var pulse := 0.5 + 0.5 * sin(time * 3.5)
+	glow_style.bg_color = Color(1.0, 0.9, 0.5, (0.20 if wall_hover else 0.05 + 0.06 * pulse))
+	glow_style.border_color = Color(1.0, 0.9, 0.5, (0.95 if wall_hover else 0.35 + 0.35 * pulse))
+	draw_style_box(glow_style, WALL_SHELF.grow(2.0))
+	if wall_hover:
+		_txt(Vector2(WALL_SHELF.position.x - 150.0, WALL_SHELF.end.y + 28.0), "Open the shelf", 18, Color(1, 0.96, 0.85, 0.98), true, HORIZONTAL_ALIGNMENT_CENTER, 300.0)
+	else:
+		_txt(Vector2(WALL_SHELF.position.x - 150.0, WALL_SHELF.end.y + 28.0), "Gift shelf", 16, Color(1, 0.96, 0.85, 0.5 + 0.4 * pulse), true, HORIZONTAL_ALIGNMENT_CENTER, 300.0)
 
 
-func _shelf_at(p: Vector2) -> int:
-	for i in Data.STOCK.size():
-		if _shelf_rect(i).has_point(p):
-			return i
-	return -1
+## Запас на полке: {item_id: сколько штук}. Игрушка с нулём стоит серой и недоступна, у остальных значок «x2»,
+## а тех, кого в словаре нет, на полке нет вовсе. Пока set_stock не вызывали, видны четыре простые игрушки без счётчика.
+func set_stock(counts: Dictionary) -> void:
+	stock_counts = counts.duplicate()
+	stock_set = true
 
 
-func _draw_shelf() -> void:
-	for i in Data.STOCK.size():
-		var id := str(Data.STOCK[i])
-		var sz: Vector2 = SHELF_SIZE[id]
-		var p: Vector2 = SHELF_POS[i]
-		var hov := (i == shelf_hover)
-		var hint := 0.0
-		if offer_enabled:
-			hint = 0.5 + 0.5 * sin(time * 4.0 + float(i))
-		var k := 1.14 if hov else 1.0 + 0.03 * hint
+## Какие игрушки сейчас лежат на полке, в порядке мест (простые, потом дорогие).
+func _shelf_ids() -> Array:
+	var out: Array = []
+	if not stock_set:
+		for id in Data.STOCK:
+			out.append(str(id))
+		return out
+	for id2 in Data.STOCK + Data.STOCK_MID:
+		if stock_counts.has(id2):
+			out.append(str(id2))
+	return out
+
+
+func _stock_left(id: String) -> int:
+	return 999 if not stock_set else int(stock_counts.get(id, 0))
+
+
+## Размер игрушки на прилавке: высота по виду игрушки, ширина по пропорциям спрайта.
+func _item_size(id: String) -> Vector2:
+	var base: Vector2 = SHELF_SIZE[str(Data.ITEMS[id]["kind"])]
+	var tex: Texture2D = T_ITEMS[id]
+	return Vector2(base.y * float(tex.get_width()) / float(tex.get_height()), base.y)
+
+
+func _shelf_view_rect(id: String) -> Rect2:
+	var sz := _item_size(id) * SHELF_VIEW_SCALE
+	var p: Vector2 = SHELF_SLOTS[id]
+	return Rect2(p.x - sz.x * 0.5, p.y - sz.y, sz.x, sz.y).grow(10.0)
+
+
+## Игрушка под точкой p на открытой полке ("" — никакой; игрушки с нулём не берутся).
+func _shelf_view_at(p: Vector2) -> String:
+	if shelf_t < 0.5:
+		return ""
+	for id in _shelf_ids():
+		if _stock_left(str(id)) > 0 and _shelf_view_rect(str(id)).has_point(p):
+			return str(id)
+	return ""
+
+
+## Полка крупным планом: две доски, на них весь наш запас. Клик по игрушке — предложить её клиенту.
+func _draw_shelf_view() -> void:
+	if shelf_t <= 0.0:
+		return
+	var e := U.ease_out_back(shelf_t)
+	draw_texture_rect(T_SHELF_VIEW, SHELF_VIEW, false, Color(1, 1, 1, clampf(shelf_t * 1.6, 0.0, 1.0)))
+	draw_rect(Rect2(SHELF_VIEW.position, Vector2(SHELF_VIEW.size.x, 4.0)), Color(0, 0, 0, 0.35 * shelf_t))
+	var sign_c := Vector2(640.0, 180.0)
+	_txt(sign_c + Vector2(-150.0, 10.0), "Pick a gift", 30, Color("#3a2418"), false, HORIZONTAL_ALIGNMENT_CENTER, 300.0)
+	var n := 0
+	for id in _shelf_ids():
+		n += 1
+		var sid := str(id)
+		var sz := _item_size(sid) * SHELF_VIEW_SCALE
+		var p: Vector2 = SHELF_SLOTS[sid]
+		var left := _stock_left(sid)
+		var out := left <= 0
+		var hov := (sid == shelf_hover_id)
+		var k := (1.08 if hov else 1.0 + 0.012 * sin(time * 2.4 + float(n))) * maxf(e, 0.001)
 		var s2 := sz * k
+		draw_colored_polygon(U.ellipse(p + Vector2(0, 4), sz.x * 0.42, 9.0), Color(0, 0, 0, (0.15 if out else 0.28) * shelf_t))
 		if hov:
-			draw_circle(p + Vector2(0.0, -sz.y * 0.5), 52.0, Color(1.0, 0.92, 0.55, 0.28))
-		draw_texture_rect(T_ITEMS[id], Rect2(p.x - s2.x * 0.5, p.y - s2.y, s2.x, s2.y), false)
+			draw_circle(p + Vector2(0.0, -sz.y * 0.5), maxf(sz.x, sz.y) * 0.62, Color(1.0, 0.92, 0.55, 0.22))
+		draw_texture_rect(T_ITEMS[sid], Rect2(p.x - s2.x * 0.5, p.y - s2.y, s2.x, s2.y), false, Color(0.42, 0.42, 0.46, 0.6) if out else Color.WHITE)
+		if stock_set:
+			if out:
+				_txt(Vector2(p.x - 100.0, p.y + 32.0), "Out of stock", 17, Color(1, 0.9, 0.8, 0.8), true, HORIZONTAL_ALIGNMENT_CENTER, 200.0)
+			else:
+				var bc := Vector2(p.x + sz.x * 0.5 - 4.0, p.y - sz.y + 6.0)
+				draw_circle(bc, 17.0, Color("#d8343a"))
+				draw_arc(bc, 17.0, 0.0, TAU, 24, U.INK, 3.0)
+				_txt(Vector2(bc.x - 30.0, bc.y + 7.0), "x%d" % left, 19, Color.WHITE, true, HORIZONTAL_ALIGNMENT_CENTER, 60.0)
 		if hov:
-			var it: Dictionary = Data.ITEMS[id]
-			_txt(Vector2(p.x - 80.0, p.y - sz.y - 18.0), str(it["name"]), 17, Color(1, 0.96, 0.85, 0.98), true, HORIZONTAL_ALIGNMENT_CENTER, 160.0)
+			var it: Dictionary = Data.ITEMS[sid]
+			_txt(Vector2(p.x - 150.0, p.y + 34.0), str(it["name"]), 22, Color(1, 0.96, 0.85, 0.98), true, HORIZONTAL_ALIGNMENT_CENTER, 300.0)
+	# кнопка «назад»
+	var br := BACK_BTN
+	draw_rect(Rect2(br.position + Vector2(3, 4), br.size), Color(0, 0, 0, 0.3))
+	U.fill_stroke(self, U.rect_pts(br), Color("#f0c05a") if back_hover else Color("#d9cdb2"), 3.5, time)
+	_txt(Vector2(br.position.x, br.position.y + 32.0), "< Back (Esc)", 20, U.INK, false, HORIZONTAL_ALIGNMENT_CENTER, br.size.x)

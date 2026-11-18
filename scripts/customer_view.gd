@@ -8,14 +8,16 @@ signal left
 const U = preload("res://scripts/util.gd")
 
 const HOME_X := 470.0
-const ENTER_FROM := 620.0
+const ENTER_X := -620.0   # входит слева
+const LEAVE_X := 620.0    # уходит вправо
+const LIFT_Y := -58.0     # клиент стоит чуть выше, над прилавком видно почти весь торс
 const FEET_Y := 337.0
 
 ## Клиенты с нарисованными кадрами (7 кадров от тревоги до смеха): имя в данных -> имя файлов.
 ## Остальные клиенты пока рисуются кодом, пока для них нет кадров.
 const SPRITE_IDS := {
 	"Mrs. Tanaka": "tanaka", "Mateo": "mateo", "Ingrid": "ingrid",
-	"Mr. Okafor": "okafor", "Granny Zeynep": "zeynep",
+	"Mr. Okafor": "okafor", "Granny Zeynep": "zeynep", "Santa": "santa",
 }
 const SPRITE_H := 224.0       # высота спрайта в единицах узла (узел ещё масштабируется)
 const SPRITE_BASE_Y := 350.0  # нижний срез спрайта прячется за прилавком
@@ -29,11 +31,12 @@ var sprite: Array = []        # 7 текстур или пусто
 var face := 2.0               # какой кадр сейчас показан (дробный, плавно идёт к цели)
 var reacted := false          # клиент уже отреагировал на результат
 var worry := 1.0              # доля оставшегося терпения 0..1
+var face_override := -1       # кадр лица задан извне (сцена с Сантой), -1 значит как обычно
 
 var data: Dictionary = {}
 var mood := 1
 var state := "none"   # none, entering, idle, leaving
-var x_off := ENTER_FROM
+var x_off := ENTER_X
 var t_state := 0.0
 var time := 0.0
 var react_t := 99.0
@@ -43,7 +46,7 @@ var sparkle_t := 99.0
 
 
 func _ready() -> void:
-	position = Vector2(HOME_X + ENTER_FROM, 0)
+	position = Vector2(HOME_X + ENTER_X, LIFT_Y)
 
 
 func arrive(c: Dictionary) -> void:
@@ -51,12 +54,13 @@ func arrive(c: Dictionary) -> void:
 	mood = 1
 	state = "entering"
 	t_state = 0.0
-	x_off = ENTER_FROM
+	x_off = ENTER_X
 	react_t = 99.0
 	sparkle_t = 99.0
 	reacted = false
 	worry = 1.0
 	face = 2.0
+	face_override = -1
 	sprite = _load_sprite(str(c.get("name", "")))
 
 
@@ -91,6 +95,8 @@ func _load_sprite(cname: String) -> Array:
 
 ## Какой кадр лица нужен сейчас: после реакции по результату, иначе по оставшемуся терпению.
 func _face_target() -> int:
+	if face_override >= 0:
+		return face_override
 	if reacted:
 		if mood >= 2:
 			return 6
@@ -112,10 +118,11 @@ func leave() -> void:
 func reset() -> void:
 	data = {}
 	sprite = []
+	face_override = -1
 	reacted = false
 	state = "none"
-	x_off = ENTER_FROM
-	position = Vector2(HOME_X + ENTER_FROM, 0)
+	x_off = ENTER_X
+	position = Vector2(HOME_X + ENTER_X, LIFT_Y)
 
 
 func _process(delta: float) -> void:
@@ -131,19 +138,19 @@ func _process(delta: float) -> void:
 		face = move_toward(face, float(_face_target()), FACE_FPS * delta)
 	if state == "entering":
 		t_state += delta / 1.1
-		x_off = ENTER_FROM * (1.0 - U.ease_out_back(minf(t_state, 1.0)))
+		x_off = ENTER_X * (1.0 - U.ease_out_back(minf(t_state, 1.0)))
 		if t_state >= 1.0:
 			x_off = 0.0
 			state = "idle"
 			arrived.emit()
 	elif state == "leaving":
 		t_state += delta / 0.9
-		x_off = ENTER_FROM * U.ease_in(t_state)
+		x_off = LEAVE_X * U.ease_in(t_state)
 		if t_state >= 1.0:
 			state = "none"
 			data = {}
 			left.emit()
-	position = Vector2(HOME_X + x_off, 0)
+	position = Vector2(HOME_X + x_off, LIFT_Y)
 	queue_redraw()
 
 

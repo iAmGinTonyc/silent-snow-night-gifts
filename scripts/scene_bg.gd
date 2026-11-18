@@ -36,8 +36,8 @@ func _ready() -> void:
 			"v": rng.randf_range(14.0, 40.0),
 			"ph": rng.randf_range(0.0, TAU),
 		})
-	glow_tex = _make_radial(Color(1.0, 0.82, 0.5, 0.30), Color(1.0, 0.82, 0.5, 0.0), 0.0)
-	vignette_tex = _make_radial(Color(0.0, 0.0, 0.0, 0.0), Color(0.03, 0.0, 0.05, 0.5), 0.45)
+	glow_tex = _make_radial(Color(1.0, 0.82, 0.5, 0.09), Color(1.0, 0.82, 0.5, 0.0), 0.0)
+	vignette_tex = _make_radial(Color(0.0, 0.0, 0.0, 0.0), Color(0.03, 0.0, 0.05, 0.24), 0.5)
 
 
 func _make_radial(inner: Color, outer: Color, inner_at: float) -> GradientTexture2D:
@@ -118,7 +118,7 @@ func _draw_front(with_glow: bool) -> void:
 	if with_glow:
 		var breathe := 0.94 + 0.06 * sin(time * 1.7)
 		draw_texture_rect(glow_tex, Rect2(LAMP - Vector2(560, 440), Vector2(1120, 880)), false, Color(1, 1, 1, breathe))
-		draw_texture_rect(glow_tex, Rect2(LAMP - Vector2(220, 180), Vector2(440, 360)), false, Color(1, 0.95, 0.8, 0.8 * breathe))
+		draw_texture_rect(glow_tex, Rect2(LAMP - Vector2(220, 180), Vector2(440, 360)), false, Color(1, 0.95, 0.8, 0.45 * breathe))
 	draw_texture_rect(vignette_tex, Rect2(0, 0, 1280, 720), false)
 	for fw in fireworks:
 		var t: float = fw["t"]

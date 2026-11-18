@@ -8,10 +8,13 @@ const START_MONEY := 20
 ## cpp: coins per 100 px of paper pulled from the roll. price: shop price (0 = owned from the start).
 ## bonus: extra rating for a premium material.
 const PAPERS := [
-	{"id": "red_stars", "name": "Red with stars", "tag": "red", "base": "#c23b3b", "accent": "#f6e7c8", "pattern": "stars", "cpp": 1.0, "price": 0, "premium": false, "bonus": 0.0},
-	{"id": "gold", "name": "Gold", "tag": "gold", "base": "#d6a93f", "accent": "#fff1b8", "pattern": "lines", "cpp": 1.0, "price": 0, "premium": false, "bonus": 0.0},
-	{"id": "blue_stripes", "name": "Blue stripes", "tag": "blue", "base": "#2a4a8a", "accent": "#a9c4f0", "pattern": "stripes", "cpp": 1.0, "price": 0, "premium": false, "bonus": 0.0},
-	{"id": "kraft", "name": "Kraft", "tag": "kraft", "base": "#a97c50", "accent": "#5e4129", "pattern": "dots", "cpp": 0.6, "price": 0, "premium": false, "bonus": 0.0},
+	{"id": "kraft", "name": "Kraft", "tag": "kraft", "base": "#b58a5a", "accent": "#8f6a40", "pattern": "plain", "cpp": 0.6, "price": 0, "premium": false, "bonus": 0.0},
+	{"id": "red_plain", "name": "Red", "tag": "red", "base": "#b94a3e", "accent": "#e08a7e", "pattern": "plain", "cpp": 0.8, "price": 0, "premium": false, "bonus": 0.0},
+	{"id": "green_plain", "name": "Green", "tag": "green", "base": "#5f9a57", "accent": "#95c78a", "pattern": "plain", "cpp": 0.8, "price": 0, "premium": false, "bonus": 0.0},
+	{"id": "blue_plain", "name": "Blue", "tag": "blue", "base": "#5a86b8", "accent": "#93b6de", "pattern": "plain", "cpp": 0.8, "price": 0, "premium": false, "bonus": 0.0},
+	{"id": "red_stars", "name": "Red with stars", "tag": "red", "base": "#c23b3b", "accent": "#f6e7c8", "pattern": "stars", "cpp": 1.0, "price": 20, "premium": false, "bonus": 0.0},
+	{"id": "blue_stripes", "name": "Blue stripes", "tag": "blue", "base": "#2a4a8a", "accent": "#a9c4f0", "pattern": "stripes", "cpp": 1.0, "price": 25, "premium": false, "bonus": 0.0},
+	{"id": "gold", "name": "Gold", "tag": "gold", "base": "#d6a93f", "accent": "#fff1b8", "pattern": "lines", "cpp": 1.0, "price": 30, "premium": false, "bonus": 0.0},
 	{"id": "green_polka", "name": "Green polka dots", "tag": "green", "base": "#2f7a52", "accent": "#f0e6c8", "pattern": "polka", "cpp": 1.2, "price": 30, "premium": false, "bonus": 0.0},
 	{"id": "white_snow", "name": "White snowflakes", "tag": "white", "base": "#e9edf5", "accent": "#7fa6dc", "pattern": "snow", "cpp": 1.2, "price": 35, "premium": false, "bonus": 0.0},
 	{"id": "pink_check", "name": "Pink check", "tag": "pink", "base": "#e58aa8", "accent": "#fbd9e4", "pattern": "check", "cpp": 1.3, "price": 40, "premium": false, "bonus": 0.0},
@@ -43,14 +46,23 @@ const ITEMS := {
 	"box_big": {"name": "Large box", "kind": "box", "w": 210, "h": 140, "price": 16, "color": "#a87c52"},
 	"bottle": {"name": "Bottle", "kind": "bottle", "w": 230, "h": 70, "price": 14, "color": "#1f5a3a", "tail": [115, 0, 1, 0, 48]},
 	"mug": {"name": "Mug", "kind": "mug", "w": 140, "h": 110, "price": 13, "color": "#f0ece0", "tail": [74, 0, 1, 0, 40]},
-	"ball": {"name": "Football", "kind": "ball", "w": 150, "h": 150, "price": 14, "color": "#f4f1ea", "tail": [75, 0, 1, 0, 40], "sell": 24, "stock": 10},
-	"bear": {"name": "Teddy bear", "kind": "bear", "w": 150, "h": 180, "price": 18, "color": "#a9703f", "tail": [0, -88, 0, -1, 44], "sell": 30, "stock": 12},
-	"ornament": {"name": "Christmas ornament", "kind": "ornament", "w": 110, "h": 124, "price": 10, "color": "#c93a4a", "tail": [0, -62, 0, -1, 34], "sell": 18, "stock": 6},
-	"train": {"name": "Toy train", "kind": "train", "w": 232, "h": 66, "price": 16, "color": "#c93a4a", "tail": [118, 0, 1, 0, 40], "sell": 34, "stock": 14},
+	"ball": {"name": "Football", "kind": "ball", "w": 150, "h": 150, "price": 14, "color": "#f4f1ea", "tail": [75, 0, 1, 0, 40], "sell": 24, "stock": 10, "tier": "cheap"},
+	"bear": {"name": "Teddy bear", "kind": "bear", "w": 150, "h": 180, "price": 18, "color": "#a9703f", "tail": [0, -88, 0, -1, 44], "sell": 30, "stock": 12, "tier": "cheap"},
+	"ornament": {"name": "Christmas ornament", "kind": "ornament", "w": 110, "h": 124, "price": 10, "color": "#c93a4a", "tail": [0, -62, 0, -1, 34], "sell": 18, "stock": 6, "tier": "cheap"},
+	"train": {"name": "Toy train", "kind": "train", "w": 232, "h": 66, "price": 16, "color": "#c93a4a", "tail": [118, 0, 1, 0, 40], "sell": 34, "stock": 14, "tier": "cheap"},
+	"ball_mid": {"name": "Leather ball", "kind": "ball", "w": 150, "h": 150, "price": 14, "color": "#8a4a2c", "tail": [75, 0, 1, 0, 40], "sell": 52, "stock": 22, "tier": "mid"},
+	"bear_mid": {"name": "Plush bear with scarf", "kind": "bear", "w": 150, "h": 180, "price": 18, "color": "#c9955a", "tail": [0, -88, 0, -1, 44], "sell": 64, "stock": 26, "tier": "mid"},
+	"ornament_mid": {"name": "Painted ornament", "kind": "ornament", "w": 110, "h": 124, "price": 10, "color": "#bfb3a4", "tail": [0, -62, 0, -1, 34], "sell": 40, "stock": 14, "tier": "mid"},
+	"train_mid": {"name": "Wooden train set", "kind": "train", "w": 232, "h": 66, "price": 16, "color": "#4a8a4a", "tail": [118, 0, 1, 0, 40], "sell": 72, "stock": 30, "tier": "mid"},
 }
 
 ## The minimal set of gifts we keep in stock.
 const STOCK := ["bear", "ornament", "ball", "train"]
+## Mid-price versions of the same toys; they appear in the supplier catalog after the first order.
+const STOCK_MID := ["bear_mid", "ornament_mid", "ball_mid", "train_mid"]
+
+## On the first night the plaque shows how many days are left until New Year (the demo is the first three of 12 nights).
+const DAYS_TO_NEW_YEAR := 12
 
 ## What a customer says when we offer a gift. Everyone comes empty-handed: we read their mind
 ## and offer one gift from the shelf. A miss means the customer chooses for themselves.
@@ -73,18 +85,18 @@ const RIBBON_NAMES := {
 ## patience: seconds a customer waits. clock: [start, end] in minutes since midnight, for the wall clock.
 const EVENINGS := [
 	{
-		"date": "29 December",
+		"date": "20 December",
 		"sky": "#1b2347",
 		"clock": [1290, 1500],
 		"place": "Kyoto, a night platform by a closed ticket office",
 		"patience": 170.0,
 		"customers": [
 			{
-				"name": "Mrs. Tanaka", "paper": "gold", "ribbon": "any", "bow": "any", "wrap": "free",
+				"name": "Mrs. Tanaka", "paper": "any", "ribbon": "any", "bow": "any", "wrap": "free",
 				"ideal": "ornament",
 				"coat": "#7a4b6e", "skin": "#e8c8a4", "hair": "#d8d8de", "hat": "bun", "hatc": "#e8d9a8",
 				"thought": "My granddaughter is five and adores anything golden. She can stare at the lights on a tree for an hour. I want to give her something that shines.",
-				"pack": "Gold paper, please. She adores anything golden.",
+				"pack": "Something festive, please. She adores anything shiny.",
 				"good": "How beautiful! Thank you so much.",
 				"ok": "Lovely. She will be happy.",
 				"meh": "Well... it is the thought that counts.",
@@ -142,7 +154,7 @@ const EVENINGS := [
 		],
 	},
 	{
-		"date": "30 December",
+		"date": "21 December",
 		"sky": "#141a3c",
 		"clock": [1290, 1500],
 		"place": "a lonely gas station on a Patagonian highway",
@@ -221,7 +233,7 @@ const EVENINGS := [
 		],
 	},
 	{
-		"date": "31 December",
+		"date": "22 December",
 		"sky": "#0c1030",
 		"clock": [1260, 1439],
 		"place": "a stairwell in a Lisbon apartment block",
@@ -261,7 +273,7 @@ const EVENINGS := [
 				"name": "Sasha", "paper": "any", "ribbon": "any", "bow": "any", "wrap": "free",
 				"ideal": "ball",
 				"coat": "#37a37a", "skin": "#ecd0b0", "hair": "#c9a24a", "hat": "beanie", "hatc": "#f2f2f2",
-				"thought": "My friend can never sit still. On New Year he wants to run outside and play in the snow, even in the cold.",
+				"thought": "My friend can never sit still. Come New Year he will want to run outside and play in the snow, even in the cold.",
 				"pack": "Wrap it however you like.",
 				"good": "That is the spirit! Thank you!",
 				"ok": "Not bad, thanks!",
@@ -281,7 +293,7 @@ const EVENINGS := [
 				"name": "Lucia", "paper": "any", "ribbon": "any", "bow": "big", "wrap": "free",
 				"ideal": "train",
 				"coat": "#2c3e66", "skin": "#e0b894", "hair": "#2a1d16", "hat": "beret", "hatc": "#e24b4b",
-				"thought": "My little brother will wait up for midnight to open his gift. He is crazy about trains. I must make it before midnight!",
+				"thought": "My little brother will wait up for midnight to open his gift. He is crazy about trains. I must make it home before midnight!",
 				"pack": "I need the prettiest wrap you can manage, and a big bow!",
 				"good": "Right on time! Thank you so much!",
 				"ok": "Made it. Thank you!",
@@ -293,9 +305,16 @@ const EVENINGS := [
 				"coat": "#a85a6a", "skin": "#d9ab86", "hair": "#8a8a96", "hat": "none", "hatc": "#f2c14e",
 				"thought": "That little shop wrapped gifts for everyone tonight, but nobody gave a gift to the one who wrapped them. I want to.",
 				"pack": "This one is for you, wrap it any way you like.",
-				"good": "Happy New Year!",
-				"ok": "Happy New Year!",
-				"meh": "Happy New Year!",
+				"good": "Happy holidays, dear!",
+				"ok": "Happy holidays, dear!",
+				"meh": "Happy holidays, dear!",
+			},
+			{
+				"name": "Santa", "scene": "santa", "paper": "any", "ribbon": "any", "bow": "any", "wrap": "free",
+				"ideal": "box_small",
+				"coat": "#c93a3a", "skin": "#f0d0b0", "hair": "#f4f4f4", "hat": "none", "hatc": "#c93a3a",
+				"thought": "", "pack": "Wrap me one gift before I go. Empty. I do not know yet what goes inside.",
+				"good": "Neat. Very neat.", "ok": "Neat enough.", "meh": "Hm. We will practice.",
 			},
 		],
 	},

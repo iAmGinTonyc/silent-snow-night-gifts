@@ -10,8 +10,8 @@ const MASTER_DB := -4.0
 
 ## Громкость каждого звука в дБ относительно нормализованного пика.
 const GAIN := {
-	"paper_pull": -13.0, "cut": -12.0, "fold": -12.0, "crumple": -16.0, "tape": -15.0,
-	"stick": -16.0, "ribbon": -16.0, "bell": -11.0, "coin": -14.0, "purr": -18.0,
+	"paper_pull": -12.0, "paper_rustle": -16.0, "cut": -11.0, "snip": -12.0, "fold": -10.0, "crumple": -13.0,
+	"tape": -13.0, "tape_stick": -15.0, "stick": -16.0, "ribbon": -15.0, "ruler": -13.0, "roll": -14.0, "bell": -11.0, "coin": -14.0, "purr": -18.0,
 	"door": -13.0, "pop": -12.0, "dull": -18.0, "whoosh": -17.0, "pop_in": -15.0,
 	"buy": -13.0, "spend": -17.0, "click": -18.0,
 }
@@ -56,7 +56,10 @@ func play_sfx(sfx_name: String, vol_db: float = 0.0, pitch: float = 1.0) -> void
 		return
 	var p: AudioStreamPlayer = _sfx_players[_sfx_next]
 	_sfx_next = (_sfx_next + 1) % SFX_POOL
-	p.stream = sfx[sfx_name]
+	var st = sfx[sfx_name]
+	if st is Array:
+		st = st[_rng.randi() % st.size()]
+	p.stream = st
 	p.volume_db = float(GAIN.get(sfx_name, -14.0)) + minf(vol_db, 0.0)
 	p.pitch_scale = pitch
 	p.play()
@@ -93,13 +96,19 @@ func _process(delta: float) -> void:
 # --- Генерация -----------------------------------------------------------
 
 func _build_all() -> void:
-	sfx["paper_pull"] = _gen(0.5, _fn_paper_pull)
-	sfx["cut"] = _gen(0.2, _fn_cut)
-	sfx["fold"] = _gen(0.2, _fn_fold)
-	sfx["crumple"] = _gen(0.45, _fn_crumple)
-	sfx["tape"] = _gen(0.34, _fn_tape)
+	# бумага, ножницы, скотч, лента, линейка: несколько вариантов, чтобы звук не повторялся
+	sfx["paper_pull"] = _variants(3, _g_pull)
+	sfx["paper_rustle"] = _variants(4, _g_rustle)
+	sfx["fold"] = _variants(3, _g_fold)
+	sfx["snip"] = _variants(2, _g_snip)
+	sfx["cut"] = _variants(2, _g_cut)
+	sfx["crumple"] = _variants(2, _g_crumple)
+	sfx["tape"] = _variants(2, _g_tape_peel)
+	sfx["tape_stick"] = _variants(2, _g_tape_stick)
 	sfx["stick"] = _gen(0.1, _fn_stick)
-	sfx["ribbon"] = _gen(0.32, _fn_ribbon)
+	sfx["ribbon"] = _variants(2, _g_silk)
+	sfx["ruler"] = _variants(2, _g_ruler)
+	sfx["roll"] = _variants(2, _g_roll)
 	sfx["bell"] = _gen(1.6, _fn_bell)
 	sfx["coin"] = _gen(0.5, _fn_coin)
 	sfx["purr"] = _gen(1.2, _fn_purr)
@@ -183,45 +192,8 @@ func _noise() -> float:
 	return _rng.randf_range(-1.0, 1.0)
 
 
-func _fn_paper_pull(t: float, p: float) -> float:
-	_f1 += 0.10 * (_noise() - _f1)
-	return _f1 * pow(sin(p * PI), 1.2) * (0.8 + 0.2 * sin(t * 50.0))
-
-
-func _fn_cut(t: float, _p: float) -> float:
-	var out := 0.0
-	for off in [0.0, 0.09]:
-		var tt: float = t - off
-		if tt >= 0.0 and tt < 0.07:
-			_f1 += 0.22 * (_noise() - _f1)
-			out += _f1 * exp(-tt * 55.0) * 2.0 + sin(TAU * 700.0 * tt) * exp(-tt * 70.0) * 0.2
-	return out
-
-
-func _fn_fold(t: float, _p: float) -> float:
-	_f1 += 0.08 * (_noise() - _f1)
-	return _f1 * exp(-t * 18.0) * 2.0 + sin(TAU * 130.0 * t) * exp(-t * 22.0) * 0.5
-
-
-func _fn_crumple(t: float, _p: float) -> float:
-	_f1 += 0.18 * (_noise() - _f1)
-	var burst := clampf(0.5 + 0.5 * sin(t * 38.0 + sin(t * 11.0) * 3.0), 0.0, 1.0)
-	return _f1 * burst * exp(-t * 4.5)
-
-
-func _fn_tape(t: float, p: float) -> float:
-	_f1 += 0.14 * (_noise() - _f1)
-	var m := 0.55 + 0.45 * sin(TAU * (34.0 + 20.0 * p) * t)
-	return _f1 * m * pow(sin(p * PI), 0.8)
-
-
 func _fn_stick(t: float, _p: float) -> float:
 	return sin(TAU * 560.0 * t) * exp(-t * 55.0)
-
-
-func _fn_ribbon(_t: float, p: float) -> float:
-	_f1 += 0.07 * (_noise() - _f1)
-	return _f1 * pow(sin(p * PI), 2.0)
 
 
 func _fn_bell(t: float, _p: float) -> float:
@@ -288,3 +260,222 @@ func _fn_spend(t: float, p: float) -> float:
 
 func _fn_click(t: float, _p: float) -> float:
 	return sin(TAU * 480.0 * t) * exp(-t * 60.0)
+
+
+# --- Бумага, ножницы, скотч, лента, линейка: синтез из шума, фильтров и микроимпульсов -----
+
+func _variants(count: int, builder: Callable) -> Array:
+	var out: Array = []
+	for i in count:
+		out.append(builder.call())
+	return out
+
+
+## Строит звук: fn заполняет массив отсчётов, дальше нормализация пика и мягкие вход и выход.
+func _synth(dur: float, fn: Callable) -> AudioStreamWAV:
+	var n := int(dur * RATE)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	fn.call(s)
+	var peak := 0.0001
+	for i in n:
+		peak = maxf(peak, absf(s[i]))
+	var k := PEAK / peak
+	var fade_in := int(0.003 * RATE)
+	var fade_out := int(0.025 * RATE)
+	for i in n:
+		var g := k
+		if i < fade_in:
+			g *= float(i) / float(fade_in)
+		if i > n - fade_out:
+			g *= float(n - i) / float(fade_out)
+		s[i] *= g
+	return _make_wav(s)
+
+
+## Короткий щелчок-хруст: затухающий шумовой импульс с резким краем (разность соседних отсчётов).
+func _click(s: PackedFloat32Array, at: int, amp: float, tau_ms: float, tone: float = 0.0) -> void:
+	var len := int(tau_ms * 6.0 * 0.001 * RATE)
+	var prev := 0.0
+	for j in len:
+		var i := at + j
+		if i >= s.size():
+			return
+		var x := _noise()
+		var env := exp(-float(j) / (tau_ms * 0.001 * RATE))
+		s[i] += (x - prev * 0.6) * amp * env
+		if tone > 0.0:
+			s[i] += sin(TAU * tone * float(j) / float(RATE)) * amp * 0.5 * env
+		prev = x
+
+
+## Рассыпает по звуку случайные хрусткие щелчки: так шуршит мнущаяся бумага.
+func _crackles(s: PackedFloat32Array, per_sec: float, amp_lo: float, amp_hi: float, shape: float = 1.0) -> void:
+	var n := s.size()
+	var count := int(per_sec * float(n) / float(RATE))
+	for k in count:
+		var at := int(pow(_rng.randf(), shape) * float(n))
+		_click(s, at, _rng.randf_range(amp_lo, amp_hi), _rng.randf_range(0.7, 2.6), _rng.randf_range(0.0, 1.0) * 3200.0)
+
+
+func _g_pull() -> AudioStreamWAV:
+	return _synth(0.75, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var lp1 := 0.0
+		var lp2 := 0.0
+		var wander := 0.0
+		for i in n:
+			var p := float(i) / float(n)
+			var x := _noise()
+			lp1 += 0.42 * (x - lp1)
+			lp2 += 0.05 * (lp1 - lp2)
+			wander += 0.0018 * (_noise() - wander)
+			var am := clampf(0.5 + 7.0 * wander, 0.08, 1.2)
+			s[i] = (lp1 - lp2) * am * pow(sin(p * PI), 0.6) * 0.9
+		_crackles(s, 34.0, 0.12, 0.5))
+
+
+func _g_rustle() -> AudioStreamWAV:
+	return _synth(0.3, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var lp1 := 0.0
+		var lp2 := 0.0
+		for i in n:
+			var p := float(i) / float(n)
+			var x := _noise()
+			lp1 += 0.4 * (x - lp1)
+			lp2 += 0.07 * (lp1 - lp2)
+			s[i] = (lp1 - lp2) * 0.35 * sin(p * PI)
+		_crackles(s, 110.0, 0.2, 0.8))
+
+
+## Складка бумаги: резкий щелчок, хруст и тихий глухой хлопок.
+func _g_fold() -> AudioStreamWAV:
+	return _synth(0.42, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var lp1 := 0.0
+		var lp2 := 0.0
+		for i in n:
+			var t := float(i) / float(RATE)
+			var x := _noise()
+			lp1 += 0.38 * (x - lp1)
+			lp2 += 0.09 * (lp1 - lp2)
+			var env := exp(-t * 17.0)
+			s[i] = (lp1 - lp2) * env * 1.4
+			s[i] += sin(TAU * (118.0 - 40.0 * t) * t) * exp(-t * 26.0) * 0.45
+		_click(s, 0, 1.4, 0.9, 2400.0)
+		_click(s, int(0.012 * RATE), 0.9, 1.6)
+		_crackles(s, 50.0, 0.2, 0.7, 2.2))
+
+
+## Один чик ножниц: два металлических лезвия и хруст бумаги.
+func _g_snip() -> AudioStreamWAV:
+	return _synth(0.2, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var f1 := _rng.randf_range(2900.0, 3500.0)
+		var f2 := _rng.randf_range(5200.0, 6200.0)
+		for i in n:
+			var t := float(i) / float(RATE)
+			s[i] = sin(TAU * f1 * t) * exp(-t * 55.0) * 0.55 + sin(TAU * f2 * t) * exp(-t * 80.0) * 0.28
+		_click(s, 0, 1.2, 0.5, 4200.0)
+		_click(s, int(0.018 * RATE), 0.55, 2.2)
+		_crackles(s, 80.0, 0.12, 0.4, 1.6))
+
+
+## Разрез: чик и второй, тише (ножницы смыкаются, и лист отваливается).
+func _g_cut() -> AudioStreamWAV:
+	return _synth(0.34, func(s: PackedFloat32Array) -> void:
+		var f1 := _rng.randf_range(2900.0, 3400.0)
+		for off in [0.0, 0.11]:
+			var o: float = off
+			var amp := 1.0 if o == 0.0 else 0.6
+			var base := int(o * RATE)
+			for j in int(0.1 * RATE):
+				var t := float(j) / float(RATE)
+				if base + j < s.size():
+					s[base + j] += (sin(TAU * f1 * t) * exp(-t * 50.0) * 0.5 + sin(TAU * f1 * 1.8 * t) * exp(-t * 75.0) * 0.25) * amp
+			_click(s, base, 1.2 * amp, 0.5, 4200.0)
+			_click(s, base + int(0.02 * RATE), 0.6 * amp, 2.4)
+		_crackles(s, 70.0, 0.1, 0.4, 1.2))
+
+
+func _g_crumple() -> AudioStreamWAV:
+	return _synth(0.7, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var lp := 0.0
+		for i in n:
+			var p := float(i) / float(n)
+			lp += 0.05 * (_noise() - lp)
+			s[i] = lp * 0.5 * exp(-p * 3.0)
+		_crackles(s, 260.0, 0.2, 1.0, 1.7))
+
+
+## Скотч отрывают от рулона: рваное «зззит» с растущим тоном.
+func _g_tape_peel() -> AudioStreamWAV:
+	return _synth(0.5, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var lp := 0.0
+		var phase := 0.0
+		for i in n:
+			var p := float(i) / float(n)
+			var t := float(i) / float(RATE)
+			var x := _noise()
+			lp += (0.1 + 0.3 * p) * (x - lp)
+			phase += TAU * (70.0 + 90.0 * p) / float(RATE)
+			var teeth := maxf(sin(phase), 0.0)
+			teeth = pow(teeth, 0.7)
+			s[i] = lp * (0.25 + 0.75 * teeth) * pow(sin(minf(p * 1.25, 1.0) * PI * 0.5 + 0.0), 1.0) * (1.0 - 0.6 * p)
+		_crackles(s, 40.0, 0.1, 0.35))
+
+
+func _g_tape_stick() -> AudioStreamWAV:
+	return _synth(0.12, func(s: PackedFloat32Array) -> void:
+		for i in s.size():
+			var t := float(i) / float(RATE)
+			s[i] = sin(TAU * 170.0 * t) * exp(-t * 38.0) * 0.5
+		_click(s, 0, 0.7, 1.4)
+		_click(s, int(0.02 * RATE), 0.3, 2.0))
+
+
+## Атласная лента скользит по бумаге: гладкий, мягкий шелест.
+func _g_silk() -> AudioStreamWAV:
+	return _synth(0.55, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var lp1 := 0.0
+		var lp2 := 0.0
+		var wander := 0.0
+		for i in n:
+			var p := float(i) / float(n)
+			lp1 += 0.3 * (_noise() - lp1)
+			lp2 += 0.12 * (lp1 - lp2)
+			wander += 0.0006 * (_noise() - wander)
+			s[i] = (lp1 - lp2) * clampf(0.7 + 9.0 * wander, 0.25, 1.1) * pow(sin(p * PI), 1.4) * 0.8
+		_crackles(s, 8.0, 0.03, 0.1))
+
+
+## Деревянная линейка: два глухих «тук» разной высоты.
+func _g_ruler() -> AudioStreamWAV:
+	return _synth(0.22, func(s: PackedFloat32Array) -> void:
+		var f := _rng.randf_range(760.0, 900.0)
+		for off in [0.0, 0.085]:
+			var o: float = off
+			var base := int(o * RATE)
+			var ff := f if o == 0.0 else f * 0.78
+			for j in int(0.1 * RATE):
+				var t := float(j) / float(RATE)
+				if base + j < s.size():
+					s[base + j] += (sin(TAU * ff * t) * exp(-t * 48.0) + sin(TAU * ff * 2.4 * t) * exp(-t * 90.0) * 0.4) * (1.0 if o == 0.0 else 0.7)
+			_click(s, base, 0.5, 0.9))
+
+
+## Рулон берут со стойки: шорох и мягкий глухой стук.
+func _g_roll() -> AudioStreamWAV:
+	return _synth(0.28, func(s: PackedFloat32Array) -> void:
+		var n := s.size()
+		var lp := 0.0
+		for i in n:
+			var t := float(i) / float(RATE)
+			var p := float(i) / float(n)
+			lp += 0.2 * (_noise() - lp)
+			s[i] = lp * 0.5 * sin(p * PI) + sin(TAU * 95.0 * t) * exp(-t * 20.0) * 0.45
+		_crackles(s, 60.0, 0.1, 0.4))

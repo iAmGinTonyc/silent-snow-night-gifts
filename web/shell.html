@@ -128,15 +128,21 @@ body {
 
 #loader-sprite {
 	position: relative;
-	width: min(70vmin, 360px);
+	width: min(72vmin, 400px);
 	aspect-ratio: 1 / 1;
-	border: 6px solid #2a1a14;
-	border-radius: 20px;
-	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
-	background-image: url('loader.jpg');
+	background-image: url('loader.png');
 	background-size: 600% 600%;
 	background-repeat: no-repeat;
-	background-color: #14214a;
+	filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.45));
+}
+
+#loader-sprite::before {
+	content: '';
+	position: absolute;
+	inset: 6%;
+	z-index: -1;
+	border-radius: 50%;
+	background: radial-gradient(circle, rgba(255, 206, 120, 0.22) 0%, rgba(255, 206, 120, 0) 70%);
 }
 
 #loader-bar {
@@ -238,7 +244,7 @@ const engine = new Engine(GODOT_CONFIG);
 		'Polishing the little bell...',
 		'Wrapping up the loading...',
 	];
-	let frame = reduceMotion ? 22 : 0;
+	let frame = reduceMotion ? 26 : 0;
 	let lastTick = 0;
 	let lineIdx = 0;
 	let lineAt = 0;

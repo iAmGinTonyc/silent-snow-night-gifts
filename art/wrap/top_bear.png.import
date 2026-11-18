@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ttvl1vii5itk"
-path="res://.godot/imported/calendar.png-be7578c5269801c57262879df15a4739.ctex"
+uid="uid://bist3mcw7u5eg"
+path="res://.godot/imported/top_bear.png-3cec6c03cdff5dc0f89af6644c5270dd.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://art/shop/calendar.png"
-dest_files=["res://.godot/imported/calendar.png-be7578c5269801c57262879df15a4739.ctex"]
+source_file="res://art/wrap/top_bear.png"
+dest_files=["res://.godot/imported/top_bear.png-3cec6c03cdff5dc0f89af6644c5270dd.ctex"]
 
 [params]
 

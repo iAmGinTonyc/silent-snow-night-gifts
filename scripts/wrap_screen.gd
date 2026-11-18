@@ -14,23 +14,65 @@ const Shapes = preload("res://scripts/shapes.gd")
 const ItemArt = preload("res://scripts/item_art.gd")
 
 # --- Раскладка (пиксели при окне 1280x720) ---
-const CENTER := Vector2(642, 410)
-const MAT_RECT := Rect2(262, 150, 760, 520)
-const LEFT_PANEL := Rect2(14, 40, 224, 640)
-const RIGHT_PANEL := Rect2(1050, 104, 216, 576)
-const TICKET_RECT := Rect2(262, 10, 500, 130)
-const ROLL_SIZE := Vector2(170, 50)
-const SPOOL_R := 28.0
-const TAPE_POS := Vector2(1110, 446)
-const BIN_POS := Vector2(1196, 446)
-const BELL_POS := Vector2(1150, 590)
-const BELL_R := 38.0
-const SCISSORS_POS := Vector2(1108, 522)
-const RULER_POS := Vector2(1218, 556)
+const CENTER := Vector2(640, 393)
+const MAT_RECT := Rect2(286, 154, 708, 478)
+const TICKET_RECT := Rect2(405, 10, 500, 130)
+
+const T_BACK := preload("res://art/wrap/wrap_back.jpg")
+const T_SCISSORS := preload("res://art/wrap/scissors.png")
+const T_TAPE := preload("res://art/wrap/tape.png")
+const T_RULER := preload("res://art/wrap/ruler.png")
+const T_BIN := preload("res://art/wrap/bin.png")
+const T_BELL := preload("res://art/wrap/bell.png")
+const T_SPOOLS := {
+	"red": preload("res://art/wrap/spool_red.png"), "green": preload("res://art/wrap/spool_green.png"),
+	"gold": preload("res://art/wrap/spool_gold.png"), "blue": preload("res://art/wrap/spool_blue.png"),
+	"pink": preload("res://art/wrap/spool_pink.png"), "silver": preload("res://art/wrap/spool_silver.png"),
+	"purple": preload("res://art/wrap/spool_purple.png"),
+}
+# подарки сверху (ёлочная игрушка стоит шапочкой вверх, как на силуэте)
+const T_TOP := {
+	"bear": preload("res://art/wrap/top_bear.png"), "ornament": preload("res://art/shop/item_ornament.png"),
+	"ball": preload("res://art/wrap/top_ball.png"), "train": preload("res://art/wrap/top_train.png"),
+	"bear_mid": preload("res://art/wrap/top_bear_mid.png"), "ornament_mid": preload("res://art/wrap/top_ornament_mid.png"),
+	"ball_mid": preload("res://art/wrap/top_ball_mid.png"), "train_mid": preload("res://art/wrap/top_train_mid.png"),
+}
+# нарисованные рулоны базовых бумаг; для узорчатых берём серый рулон и красим его цветом бумаги
+const T_ROLLS := {
+	"kraft": preload("res://art/wrap/roll_kraft.png"), "red_plain": preload("res://art/wrap/roll_red_plain.png"),
+	"green_plain": preload("res://art/wrap/roll_green_plain.png"), "blue_plain": preload("res://art/wrap/roll_blue_plain.png"),
+}
+const T_ROLL_NEUTRAL := preload("res://art/wrap/roll_neutral.png")
+# текстуры полосок: каждая лента и скотч — полоска с контуром, тянется вдоль пути
+const T_BANDS := {
+	"tape": preload("res://art/wrap/band_tape.png"), "red": preload("res://art/wrap/band_red.png"),
+	"green": preload("res://art/wrap/band_green.png"), "gold": preload("res://art/wrap/band_gold.png"),
+	"blue": preload("res://art/wrap/band_blue.png"), "pink": preload("res://art/wrap/band_pink.png"),
+	"silver": preload("res://art/wrap/band_silver.png"), "purple": preload("res://art/wrap/band_purple.png"),
+}
+const ROLL_BODY_W := 53.0     # толщина рулона в спрайте (px)
+const ROLL_BODY_TOP := 24.0   # строка спрайта, где начинается тело рулона (выше — торчит гильза)
+const ROLL_BODY_BOT := 158.0  # строка, где тело заканчивается
+const ROLL_SLICE_TOP := 32.0  # верхний «колпак»: строки 0..32 не тянутся
+const ROLL_SLICE_BOT := 150.0 # нижний «колпак»: строки от 150 не тянутся
+const ROLL_LEN := 170.0       # длина рулона в левой панели
+const ROLL_THICK := 50.0
+const SPOOL_R := 26.0
+const SPOOL_SIZE := 56.0
+# правая панель (деревянная плашка 1060..1224 x 175..620): две колонки, ничего не наезжает друг на друга
+const COL_L := 1104.0
+const COL_R := 1190.0
+const TAPE_POS := Vector2(COL_L, 436)
+const BIN_POS := Vector2(COL_R, 438)
+const SCISSORS_POS := Vector2(COL_L, 502)
+const RULER_POS := Vector2(COL_R, 506)
+const BELL_POS := Vector2(1147, 578)
+const BELL_R := 31.0
 const PX_PER_CM := 6.0      # масштаб линейки: 1 см = 6 px
 const CARD_SIZE := Vector2(200, 240)
 
 # --- Механика упаковки ---
+const STROKE_TOL := 5.0    # допуск у края бумаги при рисовании скотча и ленты
 const MARGIN := 36.0        # поле листа сверху и снизу (загибается руками)
 const MIN_OVERLAP := 16.0   # нахлёст клапанов для «хорошей» длины
 const GOOD_RANGE := 90.0    # «хорошая» длина: Lmin .. Lmin + GOOD_RANGE
@@ -39,10 +81,15 @@ const MIN_SHEET := 60.0     # самый короткий лист, которы
 const PREVIEW_EXTRA := 30.0
 const TAPE_W := 18.0
 const TAPE_COST_PER := 120.0  # пикселей скотча на 1 монету
-const RIBBON_W := 14.0
+const RIBBON_W := 20.0
 const RIBBON_MIN_LEN := 80.0  # меньше этого ленты не видно как ленту
 const STROKE_MAX := 8
 const REACH := 12.0           # насколько за край бумаги можно вести скотч и ленту
+const RIBBON_PICK := 34.0     # на каком расстоянии от края можно «взять» начало ленты
+const RIBBON_MIN_PIECE := 36.0  # самый короткий кусок ленты от края до края
+const MAX_TILT := 0.6         # самый косой загиб, радианы (около 34 градусов)
+const CUT_EDGE_TOL := 18.0    # насколько можно не дотянуть разрез до длинного края листа
+const CUT_MIN_PATH := 28.0    # короче этого путь ножниц — просто клик, не разрез
 const FOLD_SNAP_ANGLE := 1.05
 const BOX_PAD := 36.0         # запас коробки вокруг вещи
 const SHAPE_PAD := 6.0        # бумага чуть шире силуэта
@@ -82,6 +129,7 @@ var paper_shift := 0.0  # смещение отрезанного куска к 
 var axis := "h"         # вдоль какой оси тянут бумагу: h — горизонтально, v — вертикально
 var rot := 0.0          # поворот бумаги относительно стола (0 или PI/2)
 var last_pull_len := 0.0
+var fold_snd_theta := 0.0   # при каком угле клапана играл последний шорох складывания
 ## Четыре клапана: 0 — левый, 1 — правый, 2 — верхний, 3 — нижний.
 var theta: Array[float] = [PI, PI, PI, PI]
 var theta_target: Array[float] = [PI, PI, PI, PI]
@@ -102,6 +150,18 @@ var ruler_has := false
 var ruler_a := Vector2.ZERO
 var ruler_b := Vector2.ZERO
 var ribbon_idx := -1
+var ribbon_anchored := false          # лента закреплена на одном краю и тянется за курсором
+var ribbon_anchor := Vector2.ZERO     # точка на краю подарка (локальные координаты)
+var ribbon_end_vis := Vector2.ZERO    # где сейчас кончик натягивающейся ленты (плавно догоняет цель)
+var tilt: Array[float] = [0.0, 0.0, 0.0, 0.0]   # поворот линии сгиба каждого клапана (0 — ровный загиб)
+var flap_grab := Vector2.ZERO         # где схватили клапан (координаты бумаги)
+var cut_skew := 0.0                   # на сколько линия реза уходит вдоль листа сверху вниз (px), 0 — ровный срез
+var cut_wobble := 0.0                 # на сколько рука увела ножницы от прямой (px)
+var cut_mark_err := 0.0               # на сколько срез ушёл от линии, размеченной линейкой (px)
+var cut_mark := PackedVector2Array()  # карандашная линия, размеченная линейкой (координаты бумаги)
+var cutting := false                  # ножницы зажаты и ведут разрез
+var cut_pts := PackedVector2Array()   # путь ножниц (координаты бумаги)
+var cut_snd := 0.0
 var bow_size := 1.0
 var bow_drag := false
 var bow_drag_y := 0.0
@@ -226,6 +286,7 @@ func _set_axis(a: String) -> void:
 		return
 	axis = a
 	rot = 0.0 if a == "h" else PI * 0.5
+	cut_mark = PackedVector2Array()
 	pull_len = _pull_min()
 	sheet_len = pull_len
 	pull_moved = false
@@ -260,12 +321,36 @@ func _paper_cost(length: float) -> int:
 	return maxi(roundi(length / 100.0 * float(p["cpp"])), 1)
 
 
+## Шаг и толщина рулонов в левой панели сжимаются, если купили много бумаги.
+func _roll_step() -> float:
+	return minf(76.0, 560.0 / maxf(float(inv_papers.size()), 1.0))
+
+
+func _roll_thick() -> float:
+	return minf(ROLL_THICK, _roll_step() - 4.0)
+
+
 func _roll_pos(slot: int) -> Vector2:
-	return Vector2(123.0, 86.0 + float(slot) * 76.0)
+	return Vector2(144.0, 112.0 + _roll_thick() * 0.5 + float(slot) * _roll_step())
+
+
+func _roll_rect(slot: int) -> Rect2:
+	var sz := Vector2(ROLL_LEN, _roll_thick())
+	return Rect2(_roll_pos(slot) - sz * 0.5, sz)
 
 
 func _spool_pos(slot: int) -> Vector2:
-	return Vector2(1108.0 + float(slot % 2) * 88.0, 170.0 + float(slot / 2) * 88.0)
+	return Vector2(COL_L + float(slot % 2) * (COL_R - COL_L), 206.0 + float(slot / 2) * 56.0)
+
+
+func _roll_tex(p: Dictionary) -> Texture2D:
+	return T_ROLLS.get(str(p["id"]), T_ROLL_NEUTRAL)
+
+
+func _roll_tint(p: Dictionary) -> Color:
+	if T_ROLLS.has(str(p["id"])):
+		return Color.WHITE
+	return Color.html(str(p["base"])).lerp(Color.WHITE, 0.2)
 
 
 func _popup(pos: Vector2, text: String, col: Color) -> void:
@@ -304,12 +389,18 @@ func _unhandled_input(event: InputEvent) -> void:
 				_on_press(get_global_mouse_position())
 			else:
 				_on_release()
+		elif mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
+			_cancel_ribbon()
 		elif mb.pressed and (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 			if step == Step.WRAP and not ribbon_strokes.is_empty():
 				var d := 0.1 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else -0.1
 				bow_size = clampf(bow_size + d, 0.6, 1.8)
 	elif event is InputEventMouseMotion:
 		_on_motion(get_global_mouse_position())
+	elif event is InputEventKey:
+		var ke := event as InputEventKey
+		if ke.pressed and ke.keycode == KEY_ESCAPE:
+			_cancel_ribbon()
 
 
 func _card_rect(i: int) -> Rect2:
@@ -321,13 +412,13 @@ func _card_rect(i: int) -> Rect2:
 func _hit_test(pos: Vector2) -> String:
 	if pos.distance_to(BELL_POS) < BELL_R + 6.0:
 		return "bell"
-	if pos.distance_to(BIN_POS) < 36.0:
+	if pos.distance_to(BIN_POS) < 32.0:
 		return "bin"
-	if pos.distance_to(TAPE_POS + Vector2(-6, -4)) < 36.0:
+	if Rect2(TAPE_POS - Vector2(46, 25), Vector2(92, 50)).has_point(pos):
 		return "tape"
 	if pos.distance_to(SCISSORS_POS) < 36.0:
 		return "scissors"
-	if pos.distance_to(RULER_POS) < 36.0:
+	if pos.distance_to(RULER_POS) < 34.0:
 		return "ruler"
 	if step == Step.PULL:
 		if _axis_rect("h").has_point(pos):
@@ -339,8 +430,7 @@ func _hit_test(pos: Vector2) -> String:
 			if _card_rect(i).has_point(pos):
 				return "card:%d" % i
 	for s in inv_papers.size():
-		var rp := _roll_pos(s)
-		if Rect2(rp - ROLL_SIZE * 0.5, ROLL_SIZE).grow(4.0).has_point(pos):
+		if _roll_rect(s).grow(3.0).has_point(pos):
 			return "roll:%d" % s
 	for s in inv_ribbons.size():
 		if pos.distance_to(_spool_pos(s)) < SPOOL_R + 4.0:
@@ -385,44 +475,20 @@ func _draw() -> void:
 	_draw_gift()
 	_draw_cut_preview()
 	_draw_ruler_overlay()
-	_draw_tool_cursor()
+	_draw_tooltip()
 	_draw_popups()
 
 
 func _draw_table() -> void:
-	draw_rect(Rect2(0, 0, 1280, 720), Color("#6a4630"))
-	for i in 12:
-		var y := float(i) * 60.0
-		draw_line(Vector2(0, y), Vector2(1280, y), Color(0, 0, 0, 0.16), 2.0)
-		var x := 0.0 if i % 2 == 0 else 150.0
-		while x < 1280.0:
-			draw_line(Vector2(x, y), Vector2(x, y + 60.0), Color(0, 0, 0, 0.1), 2.0)
-			x += 300.0
-	for i in 50:
-		var fy := U.hash2(i, 5) * 720.0
-		var fx := U.hash2(i, 9) * 1280.0
-		draw_line(Vector2(fx, fy), Vector2(fx + 40.0 + U.hash2(i, 3) * 80.0, fy), Color(1, 1, 1, 0.04), 2.0)
+	draw_texture_rect(T_BACK, Rect2(0, 0, 1280, 720), false)
 
 
 func _draw_panels() -> void:
-	draw_style_box(panel_style, LEFT_PANEL)
-	draw_style_box(panel_style, RIGHT_PANEL)
-	draw_string(font, Vector2(LEFT_PANEL.position.x, LEFT_PANEL.position.y + 24.0), "Paper", HORIZONTAL_ALIGNMENT_CENTER, LEFT_PANEL.size.x, 16, Color(1, 0.93, 0.75, 0.8))
-	draw_string(font, Vector2(RIGHT_PANEL.position.x, RIGHT_PANEL.position.y + 24.0), "Ribbons", HORIZONTAL_ALIGNMENT_CENTER, RIGHT_PANEL.size.x, 16, Color(1, 0.93, 0.75, 0.8))
+	pass   # деревянные панели и коврик нарисованы на столе
 
 
 func _draw_mat() -> void:
-	draw_style_box(mat_style, MAT_RECT)
-	for gx in range(1, 22):
-		var x := MAT_RECT.position.x + float(gx) * 35.0
-		draw_line(Vector2(x, MAT_RECT.position.y + 5.0), Vector2(x, MAT_RECT.end.y - 5.0), Color(1, 1, 1, 0.035), 1.0)
-	for gy in range(1, 15):
-		var y := MAT_RECT.position.y + float(gy) * 35.0
-		draw_line(Vector2(MAT_RECT.position.x + 5.0, y), Vector2(MAT_RECT.end.x - 5.0, y), Color(1, 1, 1, 0.035), 1.0)
-	for k in range(0, 76):
-		var tx := MAT_RECT.position.x + 12.0 + float(k) * 9.8
-		var tl := 10.0 if k % 5 == 0 else 5.0
-		draw_line(Vector2(tx, MAT_RECT.position.y + 8.0), Vector2(tx, MAT_RECT.position.y + 8.0 + tl), Color(1, 1, 1, 0.14), 1.0)
+	pass
 
 
 func _draw_ticket() -> void:
@@ -452,20 +518,17 @@ func _draw_rolls() -> void:
 		var selected := (gi == paper_idx)
 		var hovered := (hover == "roll:%d" % s)
 		var dx := 10.0 if selected else (4.0 if hovered else 0.0)
-		var body := Rect2(c.x - 85.0 + 14.0 + dx, c.y - 25.0, 170.0 - 14.0, 50.0)
-		draw_rect(Rect2(body.position + Vector2(4, 6), body.size), Color(0, 0, 0, 0.28))
-		_draw_print(body, p, body.position.x, 1.0, PackedVector2Array())
-		draw_rect(Rect2(body.position.x, body.position.y, body.size.x, 11.0), Color(1, 1, 1, 0.14))
-		draw_rect(Rect2(body.position.x, body.end.y - 13.0, body.size.x, 13.0), Color(0, 0, 0, 0.22))
-		_rect_stroke(body)
-		var end_c := Vector2(body.position.x, c.y)
-		U.fill_stroke(self, U.ellipse(end_c, 13.0, 25.0), Color("#d9c7a0"), 3.0, time)
-		draw_colored_polygon(U.ellipse(end_c, 6.0, 12.0), Color("#6b5640"))
+		var th := _roll_thick()
+		var k := th / ROLL_BODY_W
+		var tex := _roll_tex(p)
+		var len_px := float(tex.get_height()) * k
+		draw_colored_polygon(U.ellipse(c + Vector2(dx + 4.0, th * 0.5 + 3.0), len_px * 0.46, 5.0), Color(0, 0, 0, 0.24))
+		# спрайт рулона лежит вдоль панели: поворот на 90 градусов, свет остаётся сверху
+		draw_set_transform(c + Vector2(dx, 0.0), PI * 0.5, Vector2.ONE)
+		draw_texture_rect(tex, Rect2(-float(tex.get_width()) * k * 0.5, -len_px * 0.5, float(tex.get_width()) * k, len_px), false, _roll_tint(p))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		if selected:
-			draw_rect(body.grow(5.0), Color(1.0, 0.9, 0.5, 0.9), false, 3.0)
-		if selected or hovered:
-			var nm: String = p["name"]
-			draw_string(font, Vector2(c.x - 80.0 + dx, c.y + 42.0), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 0.96, 0.85, 0.95))
+			draw_rect(Rect2(c.x + dx - len_px * 0.5 - 4.0, c.y - th * 0.5 - 4.0, len_px + 8.0, th + 8.0), Color(1.0, 0.9, 0.5, 0.9), false, 3.0)
 
 
 func _draw_spools() -> void:
@@ -473,20 +536,69 @@ func _draw_spools() -> void:
 		var gi: int = inv_ribbons[s]
 		var rb: Dictionary = Data.RIBBONS[gi]
 		var c := _spool_pos(s)
-		var col := Color.html(rb["color"])
 		var selected := (gi == ribbon_idx and active_tool == "ribbon")
 		var hovered := (hover == "spool:%d" % s)
-		var r := SPOOL_R + (3.0 if hovered else 0.0)
-		draw_circle(c + Vector2(3, 5), r, Color(0, 0, 0, 0.28))
-		U.fill_stroke(self, U.ellipse(c, r, r, 0.0, 28), col.darkened(0.2), 3.5, time)
-		draw_circle(c, r - 4.0, col)
-		for k in 3:
-			draw_arc(c, r - 9.0 - float(k) * 5.0, 0.0, TAU, 28, col.darkened(0.15), 1.5)
-		draw_circle(c, 8.0, Color("#3b2a22"))
-		draw_circle(c, 4.0, Color("#6a4630"))
-		draw_line(c + Vector2(-r + 2.0, r - 6.0), c + Vector2(-r - 12.0, r + 8.0), col, 6.0)
+		var tex: Texture2D = T_SPOOLS[str(rb["id"])]
+		var sz := SPOOL_SIZE + (5.0 if hovered else 0.0)
+		var w := sz * float(tex.get_width()) / float(tex.get_height())
+		draw_colored_polygon(U.ellipse(c + Vector2(3, sz * 0.42), sz * 0.42, sz * 0.12), Color(0, 0, 0, 0.25))
+		draw_texture_rect(tex, Rect2(c.x - w * 0.5, c.y - sz * 0.5, w, sz), false, Color(1, 1, 1, 0.4 if selected else 1.0))
 		if selected:
-			draw_arc(c, r + 6.0, 0.0, TAU, 40, Color(1.0, 0.9, 0.5), 3.0)
+			draw_arc(c, sz * 0.62, 0.0, TAU, 40, Color(1.0, 0.9, 0.5), 3.0)
+
+
+## Спрайт инструмента по центру c, шириной w (высота по пропорциям), alpha ниже, когда он «в руке».
+func _tool_sprite(tex: Texture2D, c: Vector2, w: float, rot: float = 0.0, alpha: float = 1.0) -> void:
+	var h := w * float(tex.get_height()) / float(tex.get_width())
+	draw_set_transform(c, rot, Vector2.ONE)
+	draw_texture_rect(tex, Rect2(-w * 0.5, -h * 0.5, w, h), false, Color(1, 1, 1, alpha))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Подпись с тёмной обводкой, по центру x, базовая линия y.
+func _label(at: Vector2, text: String, size: int = 14) -> void:
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var pos := Vector2(at.x - w * 0.5, at.y)
+	draw_string_outline(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, 5, Color(0.1, 0.06, 0.05, 0.95))
+	draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(1, 0.96, 0.85))
+
+
+## Подсказка над предметом под мышью: название на тёмной плашке, всегда поверх соседей.
+func _draw_tooltip() -> void:
+	if hover == "" or stroking or pulling or flap_drag >= 0:
+		return
+	var text := ""
+	var at := Vector2.ZERO
+	if hover == "tape":
+		text = "Tape"
+		at = TAPE_POS + Vector2(0, -34)
+	elif hover == "bin":
+		text = "Trash"
+		at = BIN_POS + Vector2(0, -42)
+	elif hover == "scissors":
+		text = "Scissors"
+		at = SCISSORS_POS + Vector2(0, -50)
+	elif hover == "ruler":
+		text = "Ruler"
+		at = RULER_POS + Vector2(0, -50)
+	elif hover.begins_with("spool:"):
+		var si := int(hover.get_slice(":", 1))
+		if si >= 0 and si < inv_ribbons.size():
+			text = str(Data.RIBBONS[inv_ribbons[si]]["name"])
+			at = _spool_pos(si) + Vector2(0, -SPOOL_SIZE * 0.5 - 8.0)
+	elif hover.begins_with("roll:"):
+		var ri := int(hover.get_slice(":", 1))
+		if ri >= 0 and ri < inv_papers.size():
+			text = str(Data.PAPERS[inv_papers[ri]]["name"])
+			at = _roll_pos(ri) + Vector2(0, -_roll_thick() * 0.5 - 10.0)
+	if text == "":
+		return
+	var sz := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 17)
+	var plate := Rect2(at.x - sz.x * 0.5 - 8.0, at.y - 19.0, sz.x + 16.0, 27.0)
+	plate.position.x = clampf(plate.position.x, 4.0, 1276.0 - plate.size.x)
+	draw_rect(plate, Color(0.12, 0.08, 0.07, 0.9))
+	draw_rect(plate, Color(1.0, 0.9, 0.55, 0.5), false, 1.5)
+	draw_string(font, Vector2(plate.position.x + 8.0, plate.position.y + 20.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1, 0.96, 0.85))
 
 
 func _draw_tape_dispenser() -> void:
@@ -496,25 +608,17 @@ func _draw_tape_dispenser() -> void:
 		glow = 1.0
 	elif step == Step.WRAP and tape_strokes.is_empty():
 		glow = 0.5 + 0.5 * sin(time * 5.0)
-	draw_colored_polygon(U.ellipse(c + Vector2(0, 10), 44.0, 14.0), Color(0, 0, 0, 0.25))
-	U.fill_stroke(self, U.rect_pts(Rect2(c.x - 34.0, c.y - 4.0, 68.0, 22.0)), Color("#3a3a46"), 3.5, time)
-	U.fill_stroke(self, U.ellipse(c + Vector2(-6, -4), 26.0, 26.0), Color("#efe2b8"), 3.5, time)
-	draw_colored_polygon(U.ellipse(c + Vector2(-6, -4), 13.0, 13.0), Color("#3a3a46"))
-	draw_rect(Rect2(c.x + 12.0, c.y + 6.0, 24.0, 6.0), Color("#bfc3cc"))
+	var k := 1.06 if hover == "tape" else 1.0
+	_tool_sprite(T_TAPE, c, 88.0 * k, 0.0, 0.4 if active_tool == "tape" else 1.0)
 	if glow > 0.0:
-		draw_arc(c + Vector2(-6, -4), 34.0, 0.0, TAU, 40, Color(1, 0.93, 0.55, 0.3 + 0.5 * glow), 3.0)
+		draw_arc(c, 44.0, 0.0, TAU, 40, Color(1, 0.93, 0.55, 0.3 + 0.5 * glow), 3.0)
 
 
 func _draw_bin() -> void:
 	var c := BIN_POS + Vector2(sin(time * 55.0) * 4.0 * bin_shake, 0.0)
-	var hov := hover == "bin"
-	draw_colored_polygon(U.ellipse(c + Vector2(0, 30), 34.0, 9.0), Color(0, 0, 0, 0.25))
-	var body := PackedVector2Array([c + Vector2(-26, -14), c + Vector2(26, -14), c + Vector2(20, 30), c + Vector2(-20, 30)])
-	U.fill_stroke(self, body, Color("#6b7686") if not hov else Color("#7f8b9c"), 3.5, time)
-	for k in 3:
-		draw_line(c + Vector2(-10.0 + float(k) * 10.0, -8), c + Vector2(-8.0 + float(k) * 8.0, 24), Color(0, 0, 0, 0.3), 2.0)
-	U.fill_stroke(self, U.rect_pts(Rect2(c.x - 30.0, c.y - 24.0, 60.0, 10.0)), Color("#8a95a6"), 3.0, time)
-	draw_string(font, c + Vector2(-40, 52), "Trash", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 13, Color(1, 0.96, 0.85, 0.8))
+	var k := 1.06 if hover == "bin" else 1.0
+	draw_colored_polygon(U.ellipse(c + Vector2(0, 28), 28.0, 6.0), Color(0, 0, 0, 0.22))
+	_tool_sprite(T_BIN, c, 62.0 * k)
 
 
 func _draw_bell() -> void:
@@ -522,21 +626,12 @@ func _draw_bell() -> void:
 	if step == Step.WRAP and tucked and not tape_strokes.is_empty():
 		pulse = 0.5 + 0.5 * sin(time * 4.0)
 	var rot := sin(time * 40.0) * 0.14 * bell_shake
-	var base := BELL_POS + Vector2(0, 22)
-	draw_colored_polygon(U.ellipse(base + Vector2(0, 8), 42.0, 10.0), Color(0, 0, 0, 0.3))
-	draw_set_transform(base, rot, Vector2.ONE)
-	U.fill_stroke(self, U.ellipse(Vector2(0, 0), 40.0, 11.0), Color("#8a6b2a"), 3.5, time)
-	var dome := PackedVector2Array()
-	for k in 21:
-		var a := PI + PI * float(k) / 20.0
-		dome.append(Vector2(cos(a) * 32.0, sin(a) * 36.0))
-	U.fill_stroke(self, dome, Color("#e3b84b"), 3.5, time)
-	draw_arc(Vector2(-8, -6), 20.0, PI * 1.1, PI * 1.5, 10, Color(1, 1, 0.8, 0.6), 3.0)
-	draw_circle(Vector2(0, -38), 5.0, Color("#c99a2e"))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var k := 1.06 if hover == "bell" else 1.0
+	draw_colored_polygon(U.ellipse(BELL_POS + Vector2(0, 28), 30.0, 7.0), Color(0, 0, 0, 0.25))
+	_tool_sprite(T_BELL, BELL_POS, 60.0 * k, rot)
 	if pulse > 0.0:
-		draw_arc(BELL_POS + Vector2(0, 6), 50.0, 0.0, TAU, 40, Color(1, 0.9, 0.5, 0.25 + 0.5 * pulse), 3.0)
-	draw_string(font, BELL_POS + Vector2(-50, 62), "Hand over", HORIZONTAL_ALIGNMENT_CENTER, 100.0, 13, Color(1, 0.96, 0.85, 0.9))
+		draw_arc(BELL_POS, 42.0, 0.0, TAU, 40, Color(1, 0.9, 0.5, 0.25 + 0.5 * pulse), 3.0)
+	_label(BELL_POS + Vector2(0, 48), "Hand over")
 
 
 func _draw_popups() -> void:
@@ -581,6 +676,14 @@ func _draw_print(r: Rect2, paper: Dictionary, anchor_x: float, dir: float, clip:
 	if inner.size.x < 0.0 or inner.size.y < 0.0:
 		inner = Rect2(r.get_center(), Vector2.ZERO)  # узкая полоса (клапан почти сложен): узор не рисуем
 	match pat:
+		"plain":
+			# матовая бумага: едва заметные волокна, без рисунка
+			var fs := 46.0
+			for iy in range(int(floor(r.position.y / fs)), int(ceil(r.end.y / fs)) + 1):
+				for ix in range(int(floor(u0 / fs)) - 1, int(ceil(u1 / fs)) + 2):
+					var cp := Vector2(anchor_x + dir * ((float(ix) + U.hash2(ix, iy)) * fs), (float(iy) + U.hash2(iy, ix)) * fs)
+					if inner.has_point(cp) and _in_clip(cp, clip):
+						draw_line(cp, cp + Vector2(11.0 * dir, 2.0), Color(acc.r, acc.g, acc.b, 0.16), 1.5)
 		"stars":
 			var st := 38.0
 			for iy in range(int(floor(r.position.y / st)), int(ceil(r.end.y / st)) + 1):
@@ -742,6 +845,12 @@ func _draw_item_art(ir: Rect2) -> void:
 	if item_kind == "box":
 		var col := Color.html(item["color"])
 		_draw_box_art(ir, col, col.darkened(0.08), true)
+	elif T_TOP.has(item_id) or T_TOP.has(item_kind):
+		# сначала вид по id вещи (например bear_mid), потом по её виду (bear)
+		var tex: Texture2D = T_TOP[item_id] if T_TOP.has(item_id) else T_TOP[item_kind]
+		var sc := minf(ir.size.x / float(tex.get_width()), ir.size.y / float(tex.get_height()))
+		var sz := Vector2(tex.get_width(), tex.get_height()) * sc
+		draw_texture_rect(tex, Rect2(ir.get_center() - sz * 0.5, sz), false)
 	else:
 		ItemArt.draw(self, item_kind, item, time)
 
@@ -771,6 +880,14 @@ func _reset_gift_state() -> void:
 	stroke_pts = PackedVector2Array()
 	active_tool = ""
 	ribbon_idx = -1
+	ribbon_anchored = false
+	tilt = [0.0, 0.0, 0.0, 0.0]
+	cut_skew = 0.0
+	cut_wobble = 0.0
+	cut_mark_err = 0.0
+	cut_mark = PackedVector2Array()
+	cutting = false
+	cut_pts = PackedVector2Array()
 	bow_size = 1.0
 	bow_drag = false
 	bow_pop = 1.0
@@ -795,6 +912,8 @@ func _process(delta: float) -> void:
 	bin_shake = maxf(bin_shake - delta, 0.0)
 	bow_pop = minf(bow_pop + delta / 0.5, 1.0)
 	box_t = minf(box_t + delta / 0.45, 1.0)
+	if ribbon_anchored:
+		ribbon_end_vis = ribbon_end_vis.lerp(_ribbon_target(mouse_pos), 1.0 - exp(-24.0 * delta))
 	if paper_shift != 0.0:
 		paper_shift = lerpf(paper_shift, 0.0, 1.0 - exp(-9.0 * delta))
 		if absf(paper_shift) < 0.5:
@@ -856,6 +975,25 @@ func _update_clip() -> void:
 		clip_cur = offs[0]
 
 
+## Какая рука-курсор нужна над точкой p (см. hand_cursor.gd).
+func cursor_pose(p: Vector2) -> String:
+	if pulling:
+		return "pinch"
+	if flap_drag >= 0:
+		return "grab"
+	if active_tool == "scissors" or active_tool == "tape" or active_tool == "ribbon" or active_tool == "ruler":
+		return active_tool
+	if hover == "bell":
+		return "bell"
+	if hover != "":
+		return "hover"
+	if step == Step.PULL and p.distance_to(_paper_pt(pull_len * 0.5 + 26.0, 0.0)) < 28.0:
+		return "pinch"
+	if step == Step.WRAP and MAT_RECT.has_point(p) and absf(paper_shift) < 2.0:
+		return "hover"
+	return "point"
+
+
 func _on_motion(pos: Vector2) -> void:
 	hover = _hit_test(pos)
 	mouse_pos = pos
@@ -864,6 +1002,8 @@ func _on_motion(pos: Vector2) -> void:
 		ruler_b = pos
 	if stroking:
 		_move_stroke(pos)
+	if cutting:
+		_cut_move(pos)
 	if pulling:
 		_update_pull(pos)
 	if flap_drag >= 0:
@@ -924,26 +1064,31 @@ func _on_press(pos: Vector2) -> void:
 			return
 		if step == Step.PULL and MAT_RECT.has_point(pos):
 			if active_tool == "scissors":
-				_do_cut(pos)
+				_cut_begin(pos)
 			else:
 				pulling = true
 				pull_moved = false
 				pull_press = pos
 				last_pull_len = sheet_len
 	elif step == Step.WRAP:
-		if not ribbon_strokes.is_empty() and _has_ribbon() and _bow_hit(pos):
+		if active_tool == "" and not ribbon_strokes.is_empty() and _has_ribbon() and _bow_hit(pos):
 			bow_drag = true
 			bow_drag_y = pos.y
 			bow_drag_start = bow_size
 			return
-		if active_tool != "":
+		if active_tool == "ribbon":
+			_ribbon_press(pos)
+		elif active_tool != "":
 			_begin_stroke(pos)
 		elif MAT_RECT.has_point(pos) and absf(paper_shift) < 2.0:
 			_begin_flap_drag(pos)
 
 
 func _on_release() -> void:
+	if measuring and step == Step.PULL and ruler_b.distance_to(ruler_a) >= 40.0:
+		_set_cut_mark()
 	measuring = false
+	_cut_end()
 	if pulling:
 		pulling = false
 		_finish_pull()
@@ -955,13 +1100,15 @@ func _on_release() -> void:
 
 func _select_paper(slot: int) -> void:
 	paper_idx = int(inv_papers[slot])
+	cut_mark = PackedVector2Array()
+	cut_skew = 0.0
 	pull_len = _pull_min()
 	sheet_len = pull_len
 	pulling = false
 	pull_moved = false
 	paper_shift = 0.0
 	step = Step.PULL
-	AudioSynth.play_sfx("paper_pull")
+	AudioSynth.play_sfx("roll")
 	_hint("Choose the direction, then drag the loose end: the gift stays in the middle and the roll rolls away. Then cut with the scissors")
 
 
@@ -969,27 +1116,113 @@ func _select_paper(slot: int) -> void:
 func _update_pull(pos: Vector2) -> void:
 	if not pull_moved and pos.distance_to(pull_press) < 6.0:
 		return
+	if not pull_moved:
+		AudioSynth.play_sfx("paper_pull", 0.0, randf_range(0.95, 1.1))
 	pull_moved = true
 	var lp := _to_paper(pos - CENTER)
 	pull_len = clampf(2.0 * lp.x, _pull_min(), _pull_max())
 	sheet_len = pull_len
-	if absf(pull_len - last_pull_len) > 60.0:
+	if absf(pull_len - last_pull_len) > 34.0:
 		last_pull_len = pull_len
-		AudioSynth.play_sfx("paper_pull", -4.0, randf_range(0.9, 1.2))
+		AudioSynth.play_sfx("paper_rustle", -3.0, randf_range(0.85, 1.25))
 
 
 ## Отпустили конец: лист вытянут, но ещё не отрезан. Дальше нужны ножницы.
 func _finish_pull() -> void:
 	if not pull_moved:
 		return
-	_hint("Now take the scissors (right panel) and click where to cut. The piece slides under the gift")
+	_hint("Mark a line with the ruler if you like, then take the scissors: hold and drag across the paper from one long edge to the other")
 
 
-## Ножницы отрезают кусок от свободного конца. Длина куска = от линии реза до конца листа.
-func _do_cut(pos: Vector2) -> void:
+## Линейка в режиме вытяжки оставляет на листе карандашную линию: по ней потом ведут ножницы.
+func _set_cut_mark() -> void:
+	cut_mark = PackedVector2Array([_to_paper(ruler_a - CENTER), _to_paper(ruler_b - CENTER)])
+	AudioSynth.play_sfx("click")
+	toast.emit("Line marked. Take the scissors and cut along it")
+
+
+## Ножницы зажаты на листе: ведут разрез от края до края.
+func _cut_begin(pos: Vector2) -> void:
+	cutting = true
+	cut_snd = 0.0
+	cut_pts = PackedVector2Array([_to_paper(pos - CENTER)])
+	AudioSynth.play_sfx("snip", -8.0, randf_range(0.95, 1.1))
+
+
+func _cut_move(pos: Vector2) -> void:
+	if not cutting:
+		return
 	var lp := _to_paper(pos - CENTER)
+	var last := cut_pts[cut_pts.size() - 1]
+	var d := lp.distance_to(last)
+	if d < 3.0:
+		return
+	cut_pts.append(lp)
+	cut_snd += d
+	if cut_snd > 30.0:
+		cut_snd = 0.0
+		AudioSynth.play_sfx("snip", -9.0, randf_range(0.9, 1.25))
+
+
+## Отпустили ножницы: разрез должен пройти от одного длинного края листа до другого.
+func _cut_end() -> void:
+	if not cutting:
+		return
+	cutting = false
+	var pts := cut_pts
+	cut_pts = PackedVector2Array()
+	var total := 0.0
+	for i in range(1, pts.size()):
+		total += pts[i - 1].distance_to(pts[i])
+	if total < CUT_MIN_PATH:
+		AudioSynth.play_sfx("dull")
+		toast.emit("Hold the scissors and drag across the paper to cut it")
+		return
+	var a := pts[0]
+	var b := pts[pts.size() - 1]
+	var y_edge := _across() * 0.5 + MARGIN
+	var ok := absf(a.y) >= y_edge - CUT_EDGE_TOL and absf(b.y) >= y_edge - CUT_EDGE_TOL and a.y * b.y < 0.0
+	if not ok:
+		AudioSynth.play_sfx("dull")
+		toast.emit("Cut all the way across: from one long edge of the paper to the other")
+		return
+	# прямая реза через начало и конец пути; рука могла вилять, это идёт в штраф
+	var wob := 0.0
+	var ab := b - a
+	for q in pts:
+		wob = maxf(wob, absf(ab.cross(q - a)) / maxf(ab.length(), 1.0))
+	var ut := a.x + ab.x * (-y_edge - a.y) / ab.y
+	var ub := a.x + ab.x * (y_edge - a.y) / ab.y
+	_do_cut_line(ut, ub, wob)
+
+
+## Ровный срез в точке pos (используется тестами и как запасной вариант).
+func _do_cut(pos: Vector2) -> void:
+	var u := _to_paper(pos - CENTER).x
+	_do_cut_line(u, u, 0.0)
+
+
+## Срез по линии от (u_top, верхний край) до (u_bot, нижний край). Отрезается кусок от линии реза до свободного конца.
+func _do_cut_line(u_top: float, u_bot: float, wobble: float) -> void:
 	var u1 := pull_len * 0.5
-	var u_c := clampf(lp.x, -u1 + 6.0, u1 - MIN_SHEET)
+	var lo := -u1 + 6.0
+	var hi := u1 - MIN_SHEET
+	u_top = clampf(u_top, lo, hi)
+	u_bot = clampf(u_bot, lo, hi)
+	var u_c := (u_top + u_bot) * 0.5
+	var y_edge := _across() * 0.5 + MARGIN
+	cut_skew = u_bot - u_top
+	cut_wobble = wobble
+	cut_mark_err = 0.0
+	if cut_mark.size() == 2:
+		var m0 := cut_mark[0]
+		var m1 := cut_mark[1]
+		var md := m1 - m0
+		if md.length() > 1.0:
+			var e1 := absf(md.cross(Vector2(u_top, -y_edge) - m0)) / md.length()
+			var e2 := absf(md.cross(Vector2(u_bot, y_edge) - m0)) / md.length()
+			cut_mark_err = (e1 + e2) * 0.5
+	cut_mark = PackedVector2Array()
 	var cut_len := u1 - u_c
 	sheet_len = cut_len
 	paper_shift = (u_c + u1) * 0.5
@@ -1007,9 +1240,12 @@ func _do_cut(pos: Vector2) -> void:
 	theta_target = [PI, PI, PI, PI]
 	folded = [false, false, false, false]
 	fold_order = []
+	tilt = [0.0, 0.0, 0.0, 0.0]
 	if length_class == "short":
 		toast.emit("Not enough paper: the gift may come out crooked")
-	_hint("Fold the edges by hand: both ends, then both sides. Tape and ribbon are on the right")
+	elif absf(cut_skew) > 24.0:
+		toast.emit("The cut came out slanted: the flaps will be uneven")
+	_hint("Fold the edges by hand. Drag a flap sideways to fold it at an angle")
 
 
 func _begin_flap_drag(pos: Vector2) -> void:
@@ -1027,27 +1263,35 @@ func _begin_flap_drag(pos: Vector2) -> void:
 		if c < 2 and fh < 1.0:
 			continue
 		flap_drag = c
+		flap_grab = lp
+		fold_snd_theta = theta[c]
+		AudioSynth.play_sfx("paper_rustle", -5.0, randf_range(0.9, 1.15))
 		_update_flap_drag(pos)
 		return
 
 
 func _update_flap_drag(pos: Vector2) -> void:
 	var lp := _to_paper(pos - CENTER)
-	var f := _flap_len() if flap_drag < 2 else MARGIN
+	var i := flap_drag
+	var f := _flap_len() if i < 2 else MARGIN
 	if f < 1.0:
 		return
-	var c := 0.0
-	match flap_drag:
-		0:
-			c = (lp.x + _along() * 0.5) / f
-		1:
-			c = (_along() * 0.5 - lp.x) / f
-		2:
-			c = (lp.y + _across() * 0.5) / f
-		_:
-			c = (_across() * 0.5 - lp.y) / f
-	theta[flap_drag] = acos(clampf(c, -1.0, 1.0))
-	theta_target[flap_drag] = theta[flap_drag]
+	# линия сгиба перпендикулярна движению руки: тянешь клапан вбок, он складывается по диагонали
+	var m := lp - flap_grab
+	var m_in := -m.dot(_flap_n0(i))
+	var m_lat := m.dot(_flap_d0(i))
+	var psi := 0.0
+	if m_in > 10.0 and absf(m_lat) > 8.0:
+		psi = _flap_sign(i) * clampf(atan2(m_lat, m_in), -MAX_TILT, MAX_TILT)
+	tilt[i] = lerpf(tilt[i], psi, 0.4)
+	if absf(tilt[i]) < 0.01:
+		tilt[i] = 0.0
+	var c := -(lp - _flap_pivot(i)).dot(_flap_n(i)) / f
+	theta[i] = acos(clampf(c, -1.0, 1.0))
+	theta_target[i] = theta[i]
+	if absf(theta[i] - fold_snd_theta) > 0.13:
+		fold_snd_theta = theta[i]
+		AudioSynth.play_sfx("paper_rustle", -4.0, randf_range(0.8, 1.3))
 
 
 func _end_flap_drag() -> void:
@@ -1060,27 +1304,46 @@ func _end_flap_drag() -> void:
 		AudioSynth.play_sfx("fold", 0.0, randf_range(0.92, 1.08))
 	else:
 		theta_target[i] = PI
-		AudioSynth.play_sfx("paper_pull", -6.0, 1.3)
+		tilt[i] = 0.0
+		AudioSynth.play_sfx("paper_rustle", -2.0, 0.85)
 
 
 func _select_tool(tool_name: String) -> void:
+	if tool_name == "tape" and active_tool != "tape" and step == Step.WRAP and not folded.has(true):
+		AudioSynth.play_sfx("dull")
+		toast.emit("Fold the paper first, then tape it")
+		return
 	active_tool = "" if active_tool == tool_name else tool_name
+	ribbon_anchored = false
 	measuring = false
 	ruler_has = false
-	AudioSynth.play_sfx("click")
+	match tool_name:
+		"scissors":
+			AudioSynth.play_sfx("snip", -5.0)
+		"tape":
+			AudioSynth.play_sfx("tape_stick")
+		"ruler":
+			AudioSynth.play_sfx("ruler")
+		_:
+			AudioSynth.play_sfx("click")
 	if active_tool == "ruler":
 		_hint("Ruler in hand: the size of the gift and of the paper is shown in cm. Press and drag to measure anything")
 	elif active_tool == "tape":
 		_hint("Tape in hand: press and drag anywhere on the gift, as much as you need")
 	elif active_tool == "scissors":
-		_hint("Scissors in hand: click on the paper where to cut. The piece from the cut to the loose end slides under the gift")
+		_hint("Scissors in hand: press at one long edge of the paper, drag across to the other edge (along your pencil line) and let go")
 	elif step == Step.WRAP:
 		_hint("Fold the edges, tape, draw the ribbon, or hand over the gift")
 
 
 ## Катушку ленты берут в руку и сами обводят ленту вокруг подарка.
 func _select_ribbon_tool(slot: int) -> void:
+	if step == Step.WRAP and tape_strokes.is_empty() and active_tool != "ribbon":
+		AudioSynth.play_sfx("dull")
+		toast.emit("Tape the paper before you tie the ribbon")
+		return
 	var gi := int(inv_ribbons[slot])
+	ribbon_anchored = false
 	if active_tool == "ribbon" and ribbon_idx == gi:
 		active_tool = ""
 	else:
@@ -1088,19 +1351,22 @@ func _select_ribbon_tool(slot: int) -> void:
 		ribbon_idx = gi
 	AudioSynth.play_sfx("ribbon")
 	if active_tool == "ribbon":
-		_hint("Ribbon in hand: press and draw it around the gift. Cross it however you like")
+		_hint("Ribbon in hand: click an edge of the gift, the ribbon unrolls along it. Click the other edge to lay it down")
 
 
+## Где вообще есть бумага: скотч и лента ложатся только на неё (допуск на пару px у края).
 func _stroke_region() -> PackedVector2Array:
+	if _use_poly() and not (tucked and wrap_mode == "shape" and clip_cur.size() >= 3):
+		return _paper_footprint()
 	if tucked and wrap_mode == "shape" and clip_cur.size() >= 3:
-		var offs := Geometry2D.offset_polygon(clip_cur, REACH, Geometry2D.JOIN_ROUND)
+		var offs := Geometry2D.offset_polygon(clip_cur, STROKE_TOL, Geometry2D.JOIN_ROUND)
 		return offs[0] if offs.size() > 0 else clip_cur
 	var half := maxf(sheet_len * 0.5, _along() * 0.5)
 	var xl := -_along() * 0.5 if folded[0] else -half
 	var xr := _along() * 0.5 if folded[1] else half
 	var mt := 0.0 if folded[2] else MARGIN
 	var mb := 0.0 if folded[3] else MARGIN
-	var pts := U.rect_pts(Rect2(xl - REACH, -_across() * 0.5 - mt - REACH, xr - xl + 2.0 * REACH, _across() + mt + mb + 2.0 * REACH))
+	var pts := U.rect_pts(Rect2(xl - STROKE_TOL, -_across() * 0.5 - mt - STROKE_TOL, xr - xl + 2.0 * STROKE_TOL, _across() + mt + mb + 2.0 * STROKE_TOL))
 	var out := PackedVector2Array()
 	for p in pts:
 		out.append(p.rotated(rot))
@@ -1112,6 +1378,7 @@ func _begin_stroke(pos: Vector2) -> void:
 		return
 	var lp := pos - CENTER
 	if not Geometry2D.is_point_in_polygon(lp, _stroke_region()):
+		toast.emit("Only on the paper")
 		return
 	var count := tape_strokes.size() if active_tool == "tape" else ribbon_strokes.size()
 	if count >= STROKE_MAX:
@@ -1154,6 +1421,7 @@ func _end_stroke() -> void:
 	var pts := stroke_pts.duplicate()
 	stroke_pts = PackedVector2Array()
 	if stroke_kind == "tape":
+		AudioSynth.play_sfx("tape_stick")
 		tape_strokes.append({"pts": pts, "len": total, "age": 0.0})
 		_spend("tape", maxi(roundi(total / TAPE_COST_PER), 1), CENTER + last + Vector2(0, -34))
 	else:
@@ -1164,6 +1432,93 @@ func _end_stroke() -> void:
 		if not had and _has_ribbon():
 			bow_pop = 0.0
 			AudioSynth.play_sfx("pop_in")
+
+
+## Ближайшая к lp точка на границе бумаги: {pt, dist, inside}. Границу задаёт та же область, что и для скотча.
+func _edge_snap(lp: Vector2) -> Dictionary:
+	var poly := _stroke_region()
+	var n := poly.size()
+	var best := lp
+	var bd := INF
+	for i in n:
+		var q := Geometry2D.get_closest_point_to_segment(lp, poly[i], poly[(i + 1) % n])
+		var d := lp.distance_to(q)
+		if d < bd:
+			bd = d
+			best = q
+	return {"pt": best, "dist": bd, "inside": Geometry2D.is_point_in_polygon(lp, poly)}
+
+
+## Кусок ленты от края до края годится, если он не короткий и весь лежит на бумаге.
+func _ribbon_piece_ok(a: Vector2, b: Vector2) -> bool:
+	if a.distance_to(b) < RIBBON_MIN_PIECE:
+		return false
+	var poly := _stroke_region()
+	var n := maxi(int(a.distance_to(b) / 6.0), 2)
+	for i in range(1, n):
+		if not Geometry2D.is_point_in_polygon(a.lerp(b, float(i) / float(n)), poly):
+			return false
+	return true
+
+
+## Куда тянется лента: на ближайший к курсору край бумаги.
+func _ribbon_target(pos: Vector2) -> Vector2:
+	return _edge_snap(pos - CENTER)["pt"]
+
+
+func _cancel_ribbon() -> void:
+	if ribbon_anchored:
+		ribbon_anchored = false
+		AudioSynth.play_sfx("click")
+		if step == Step.WRAP and active_tool == "ribbon":
+			_hint("Ribbon in hand: click an edge of the gift, the ribbon unrolls along it. Click the other edge to lay it down")
+
+
+## Лента кладётся двумя щелчками: первый берёт её на краю подарка, она тянется за курсором
+## вдоль подарка к ближайшему к нему краю, второй щелчок кладёт её.
+func _ribbon_press(pos: Vector2) -> void:
+	if active_tool != "ribbon" or paper_idx < 0 or ribbon_idx < 0:
+		return
+	if ribbon_strokes.size() >= STROKE_MAX:
+		toast.emit("Out of ribbon")
+		return
+	var lp := pos - CENTER
+	var sn := _edge_snap(lp)
+	if not ribbon_anchored:
+		if float(sn["dist"]) > RIBBON_PICK:
+			AudioSynth.play_sfx("dull")
+			toast.emit("Start the ribbon at an edge of the gift")
+			return
+		ribbon_anchor = sn["pt"]
+		ribbon_end_vis = ribbon_anchor
+		ribbon_anchored = true
+		AudioSynth.play_sfx("ribbon")
+		_hint("Now the ribbon follows you. Click the other edge to lay it down (right click cancels)")
+		return
+	var e: Vector2 = sn["pt"]
+	if not _ribbon_piece_ok(ribbon_anchor, e):
+		AudioSynth.play_sfx("dull")
+		toast.emit("Take the ribbon across the gift to another edge")
+		return
+	_place_ribbon(ribbon_anchor, e)
+	ribbon_anchored = false
+	_hint("Ribbon laid. Lay another one, or hand over the gift")
+
+
+func _place_ribbon(a: Vector2, b: Vector2) -> void:
+	var d := a.distance_to(b)
+	var pts := PackedVector2Array()
+	var n := maxi(int(d / 6.0), 2)
+	for i in n + 1:
+		pts.append(a.lerp(b, float(i) / float(n)))
+	var had := _has_ribbon()
+	ribbon_strokes.append({"pts": pts, "len": d, "age": 0.0, "ribbon": ribbon_idx})
+	var rb: Dictionary = Data.RIBBONS[ribbon_idx]
+	_spend("ribbon", maxi(roundi(d / 100.0 * float(rb["cost"])), 1), CENTER + b + Vector2(0, -34))
+	AudioSynth.play_sfx("tape_stick")
+	if not had and _has_ribbon():
+		bow_pop = 0.0
+		AudioSynth.play_sfx("pop_in")
 
 
 func _ribbon_len() -> float:
@@ -1189,12 +1544,12 @@ func _bow_pos() -> Vector2:
 
 
 func _bow_hit(pos: Vector2) -> bool:
-	return (pos - CENTER - _bow_pos()).length() < 46.0 * bow_size + 10.0
+	return (pos - CENTER - _bow_pos()).length() < 40.0 * bow_size + 8.0
 
 
 func _neatness() -> Dictionary:
 	var w := _along()
-	var f := _flap_len()
+	var f := maxf(_flap_len() - absf(cut_skew) * 0.5, 0.0)   # косой срез: на одном конце клапан короче
 	var spans: Array = []
 	if folded[0]:
 		spans.append(Vector2(-w * 0.5, -w * 0.5 + minf(f, w)))
@@ -1215,6 +1570,14 @@ func _neatness() -> Dictionary:
 		tape_len += float(st["len"])
 	var tape_ok := tape_len >= 0.6 * _across()
 	var neat := 0.55 * cover + 0.10 * float(ends) + (0.25 if tape_ok else 0.0)
+	# кривой срез, виляние ножниц, уход от размеченной линии и косые загибы выглядят неряшливо
+	var y_edge := _across() * 0.5 + MARGIN
+	var pen := clampf(absf(cut_skew) / (2.0 * y_edge) * 0.6, 0.0, 0.25)
+	pen += clampf(cut_wobble / 60.0, 0.0, 0.1) + clampf(cut_mark_err / 80.0, 0.0, 0.15)
+	for fi in 4:
+		if folded[fi]:
+			pen += clampf(absf(tilt[fi]) * 0.25, 0.0, 0.1)
+	neat -= pen
 	return {"neat": clampf(neat, 0.0, 1.0), "cover": cover, "ends": ends, "tape_len": tape_len, "tape_ok": tape_ok}
 
 
@@ -1283,49 +1646,86 @@ func _try_deliver() -> void:
 	gift_ready.emit(result)
 
 
-## Полоска скотча по пути (в локальных координатах подарка).
+## Оставляет точки не чаще чем через step px (последняя точка всегда остаётся).
+func _thin(pts: PackedVector2Array, step_px: float) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	if pts.is_empty():
+		return out
+	out.append(pts[0])
+	for i in range(1, pts.size()):
+		if i == pts.size() - 1 or out[out.size() - 1].distance_to(pts[i]) >= step_px:
+			out.append(pts[i])
+	return out
+
+
+func _mirror_u(u: float) -> float:
+	var f := fposmod(u, 2.0)
+	return f if f <= 1.0 else 2.0 - f
+
+
+## Полоска из текстуры по пути: четырёхугольники с общими боковыми вершинами. Текстура идёт вдоль пути
+## и зеркально повторяется, если путь длиннее неё; u0 сдвигает начало, чтобы куски выглядели по-разному.
+func _draw_band(pts: PackedVector2Array, width: float, tex: Texture2D, u0: float, tint: Color) -> void:
+	var n := pts.size()
+	if n < 2:
+		return
+	var nat := float(tex.get_width()) / float(tex.get_height()) * width
+	var left := PackedVector2Array()
+	var right := PackedVector2Array()
+	var us := PackedFloat32Array()
+	var dist := 0.0
+	for i in n:
+		var d0 := (pts[i] - pts[i - 1]).normalized() if i > 0 else Vector2.ZERO
+		var d1 := (pts[i + 1] - pts[i]).normalized() if i < n - 1 else Vector2.ZERO
+		var nm := Vector2.ZERO
+		var sc := 1.0
+		if d0 == Vector2.ZERO:
+			nm = Vector2(-d1.y, d1.x)
+		elif d1 == Vector2.ZERO:
+			nm = Vector2(-d0.y, d0.x)
+		else:
+			var n0 := Vector2(-d0.y, d0.x)
+			var n1 := Vector2(-d1.y, d1.x)
+			nm = (n0 + n1).normalized() if (n0 + n1).length() > 0.01 else n0
+			sc = 1.0 / maxf(nm.dot(n0), 0.5)
+		var off := nm * width * 0.5 * sc
+		left.append(pts[i] + off)
+		right.append(pts[i] - off)
+		if i > 0:
+			dist += pts[i].distance_to(pts[i - 1])
+		us.append(dist)
+	var cols := PackedColorArray([tint, tint, tint, tint])
+	for i in n - 1:
+		var ua := _mirror_u(u0 + us[i] / nat)
+		var ub := _mirror_u(u0 + us[i + 1] / nat)
+		draw_primitive(PackedVector2Array([left[i], left[i + 1], right[i + 1], right[i]]), cols,
+			PackedVector2Array([Vector2(ua, 0.0), Vector2(ub, 0.0), Vector2(ub, 1.0), Vector2(ua, 1.0)]), tex)
+
+
+## Полоска скотча по пути (в локальных координатах подарка): полупрозрачная, бумага видна сквозь неё.
 func _draw_tape_path(pts: PackedVector2Array, age: float) -> void:
 	if pts.size() < 2:
 		return
 	var w := TAPE_W * (1.0 + 0.35 * exp(-age * 12.0))
-	var col := Color(0.97, 0.95, 0.82, 0.62)
-	draw_polyline(pts, col, w, true)
-	draw_polyline(pts, Color(1, 1, 1, 0.35), w * 0.3, true)
-	draw_circle(pts[0], w * 0.5, col)
-	draw_circle(pts[pts.size() - 1], w * 0.5, col)
+	var sp := _thin(pts, 6.0)
+	var sh := PackedVector2Array()
+	for q in sp:
+		sh.append(q + Vector2(1.5, 2.5))
+	draw_polyline(sh, Color(0, 0, 0, 0.12), w, false)
+	_draw_band(sp, w, T_BANDS["tape"], fposmod(pts[0].x * 0.011 + pts[0].y * 0.017, 1.0), Color(1, 1, 1, 0.62))
 
 
-## Лента по пути, обведённому игроком.
-func _draw_ribbon_path(pts: PackedVector2Array, age: float, rc: Color) -> void:
+## Лента по пути: текстура выбранного цвета, под ней мягкая тень.
+func _draw_ribbon_path(pts: PackedVector2Array, age: float, ribbon_id: String, alpha: float = 1.0) -> void:
 	if pts.size() < 2:
 		return
 	var w := RIBBON_W * (1.0 + 0.3 * exp(-age * 12.0))
-	draw_polyline(pts, U.INK, w + 5.0, true)
-	draw_polyline(pts, rc, w, true)
-	draw_polyline(pts, rc.lightened(0.3), w * 0.28, true)
-
-
-## Инструмент «в руке»: ножницы, скотч или катушка ленты рядом с курсором.
-func _draw_tool_cursor() -> void:
-	if active_tool == "" or not MAT_RECT.grow(60.0).has_point(mouse_pos):
-		return
-	var c := mouse_pos + Vector2(20, 22)
-	if active_tool == "tape":
-		U.fill_stroke(self, U.ellipse(c, 14.0, 14.0, 0.0, 20), Color("#efe2b8"), 3.0, time)
-		draw_colored_polygon(U.ellipse(c, 6.0, 6.0, 0.0, 14), Color("#3a3a46"))
-	elif active_tool == "ruler":
-		_draw_ruler_icon(c + Vector2(4, 2), 0.7, -0.6, false)
-	elif active_tool == "scissors":
-		for sg in [-1.0, 1.0]:
-			var s: float = sg
-			draw_line(c + Vector2(s * 7.0, 12.0), c + Vector2(-s * 9.0, -14.0), U.INK, 6.0)
-			draw_line(c + Vector2(s * 7.0, 12.0), c + Vector2(-s * 9.0, -14.0), Color("#d7dce4"), 3.0)
-			draw_circle(c + Vector2(s * 8.0, 15.0), 5.0, Color("#d8343a"))
-	elif ribbon_idx >= 0:
-		var rb: Dictionary = Data.RIBBONS[ribbon_idx]
-		var rc := Color.html(rb["color"])
-		U.fill_stroke(self, U.ellipse(c, 15.0, 15.0, 0.0, 20), rc, 3.0, time)
-		draw_colored_polygon(U.ellipse(c, 6.0, 6.0, 0.0, 14), Color("#3b2a22"))
+	var sp := _thin(pts, 8.0)
+	var sh := PackedVector2Array()
+	for q in sp:
+		sh.append(q + Vector2(2.0, 3.0))
+	draw_polyline(sh, Color(0, 0, 0, 0.22 * alpha), w, false)
+	_draw_band(sp, w, T_BANDS[ribbon_id], fposmod(pts[0].x * 0.013 + pts[0].y * 0.009, 1.0), Color(1, 1, 1, alpha))
 
 
 func _axis_rect(a: String) -> Rect2:
@@ -1358,26 +1758,16 @@ func _draw_axis_buttons() -> void:
 func _draw_scissors() -> void:
 	var c := SCISSORS_POS
 	var on := active_tool == "scissors"
-	var hov := hover == "scissors"
 	var glow := 0.0
 	if on:
 		glow = 1.0
 	elif step == Step.PULL and pull_moved:
 		glow = 0.5 + 0.5 * sin(time * 5.0)
-	var open := 0.4 if (on or hov) else 0.16
-	draw_colored_polygon(U.ellipse(c + Vector2(0, 30), 40.0, 9.0), Color(0, 0, 0, 0.25))
-	for sg in [-1.0, 1.0]:
-		var s: float = sg
-		var handle := c + Vector2(s * 15.0, 24.0)
-		var tip := c + Vector2(-s * open * 46.0, -40.0)
-		draw_line(handle, tip, U.INK, 9.0)
-		draw_line(handle, tip, Color("#d7dce4"), 5.0)
-		U.fill_stroke(self, U.ellipse(handle, 10.0, 12.0, 0.0, 16), Color("#d8343a"), 3.0, time)
-		draw_colored_polygon(U.ellipse(handle, 4.0, 5.0, 0.0, 10), Color("#6a1d20"))
-	draw_circle(c, 4.0, U.INK)
+	var k := 1.06 if hover == "scissors" else 1.0
+	draw_colored_polygon(U.ellipse(c + Vector2(0, 30), 34.0, 6.0), Color(0, 0, 0, 0.22))
+	_tool_sprite(T_SCISSORS, c, 88.0 * k, -0.35, 0.4 if on else 1.0)
 	if glow > 0.0:
-		draw_arc(c + Vector2(0, -6), 44.0, 0.0, TAU, 40, Color(1, 0.93, 0.55, 0.3 + 0.5 * glow), 3.0)
-	draw_string(font, c + Vector2(-40, 56), "Scissors", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 13, Color(1, 0.96, 0.85, 0.9))
+		draw_arc(c, 46.0, 0.0, TAU, 40, Color(1, 0.93, 0.55, 0.3 + 0.5 * glow), 3.0)
 
 
 ## Деревянная линейка с делениями (иконка и курсор).
@@ -1398,11 +1788,10 @@ func _draw_ruler_icon(c: Vector2, k: float, ang: float, shadow: bool) -> void:
 
 func _draw_ruler_button() -> void:
 	var on := active_tool == "ruler"
-	var hov := hover == "ruler"
-	_draw_ruler_icon(RULER_POS + Vector2(0, -4), 1.0, -0.6 if not (on or hov) else -0.75, true)
+	var k := 1.06 if hover == "ruler" else 1.0
+	_tool_sprite(T_RULER, RULER_POS, 84.0 * k, -PI * 0.25, 0.4 if on else 1.0)
 	if on:
-		draw_arc(RULER_POS + Vector2(0, -4), 44.0, 0.0, TAU, 40, Color(1, 0.93, 0.55, 0.85), 3.0)
-	draw_string(font, RULER_POS + Vector2(-40, 46), "Ruler", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 13, Color(1, 0.96, 0.85, 0.9))
+		draw_arc(RULER_POS, 40.0, 0.0, TAU, 40, Color(1, 0.93, 0.55, 0.85), 3.0)
 
 
 ## Размерная линия с засечками каждый сантиметр и подписью.
@@ -1458,18 +1847,238 @@ func _draw_ruler_overlay() -> void:
 		_dim_line(ruler_a, ruler_b, "%.1f cm" % (d.length() / PX_PER_CM), Color("#a8d4ff"), Vector2(0, -24))
 
 
-## Где ножницы отрежут: линия реза вдоль листа и длина куска.
+## Карандашная линия линейки, путь ножниц и подсказка рядом с рукой.
 func _draw_cut_preview() -> void:
-	if step != Step.PULL or active_tool != "scissors" or not MAT_RECT.has_point(mouse_pos):
+	if step != Step.PULL or paper_idx < 0:
 		return
-	var lp := _to_paper(mouse_pos - CENTER)
-	var u1 := pull_len * 0.5
-	var u_c := clampf(lp.x, -u1 + 6.0, u1 - MIN_SHEET)
-	var hh := _across() * 0.5 + MARGIN + 12.0
 	_set_paper_transform()
-	draw_dashed_line(Vector2(u_c, -hh), Vector2(u_c, hh), Color(1.0, 0.45, 0.4, 0.95), 3.0, 8.0)
+	if cut_mark.size() == 2:
+		draw_line(cut_mark[0], cut_mark[1], Color(1, 1, 1, 0.45), 6.0)
+		draw_dashed_line(cut_mark[0], cut_mark[1], Color(0.2, 0.18, 0.22, 0.95), 2.5, 7.0)
+	if cutting and cut_pts.size() >= 2:
+		draw_polyline(cut_pts, Color(1.0, 0.45, 0.4, 0.95), 3.0, true)
+		draw_circle(cut_pts[cut_pts.size() - 1], 5.0, Color(1.0, 0.45, 0.4))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_string(font, mouse_pos + Vector2(18, -14), "Cut length: %d" % int(u1 - u_c), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 0.8, 0.75))
+	if active_tool == "scissors" and MAT_RECT.has_point(mouse_pos):
+		var txt := "Drag across the paper to cut"
+		if cutting:
+			var u1 := pull_len * 0.5
+			var cu := clampf(_to_paper(mouse_pos - CENTER).x, -u1 + 6.0, u1 - MIN_SHEET)
+			txt = "Piece: %d cm" % roundi((u1 - cu) / PX_PER_CM)
+		_label(mouse_pos + Vector2(70, -18), txt, 16)
+
+
+## --- Полигоны листа: косой срез и косые загибы -----------------------------------------------
+
+func _use_poly() -> bool:
+	if absf(cut_skew) > 0.5:
+		return true
+	for i in 4:
+		if absf(tilt[i]) > 0.01:
+			return true
+	return false
+
+
+func _flap_n0(i: int) -> Vector2:
+	return [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)][i]
+
+
+func _flap_d0(i: int) -> Vector2:
+	return Vector2(0, 1) if i < 2 else Vector2(1, 0)
+
+
+func _flap_sign(i: int) -> float:
+	return [1.0, -1.0, -1.0, 1.0][i]
+
+
+func _flap_pivot(i: int) -> Vector2:
+	var hw := _along() * 0.5
+	var hh := _across() * 0.5
+	return [Vector2(-hw, 0), Vector2(hw, 0), Vector2(0, -hh), Vector2(0, hh)][i]
+
+
+func _flap_d(i: int) -> Vector2:
+	return _flap_d0(i).rotated(tilt[i])
+
+
+func _flap_n(i: int) -> Vector2:
+	return _flap_n0(i).rotated(tilt[i])
+
+
+## Лист в координатах бумаги: правый конец ровный, левый (линия реза) может быть косым.
+func _sheet_poly() -> PackedVector2Array:
+	var sl := maxf(sheet_len, 1.0)
+	var y := _across() * 0.5 + MARGIN
+	return PackedVector2Array([Vector2(-sl * 0.5 - cut_skew * 0.5, -y), Vector2(sl * 0.5, -y), Vector2(sl * 0.5, y), Vector2(-sl * 0.5 + cut_skew * 0.5, y)])
+
+
+func _half_plane(pv: Vector2, d: Vector2, n: Vector2, outer: bool) -> PackedVector2Array:
+	var big := 3000.0
+	var nn := n if outer else -n
+	return PackedVector2Array([pv - d * big, pv + d * big, pv + d * big + nn * big, pv - d * big + nn * big])
+
+
+func _poly_area(poly: PackedVector2Array) -> float:
+	var a := 0.0
+	for i in poly.size():
+		var p := poly[i]
+		var q := poly[(i + 1) % poly.size()]
+		a += p.x * q.y - q.x * p.y
+	return absf(a) * 0.5
+
+
+## Лист делится по линиям сгиба: клапаны отщепляются в порядке складывания, остаток — основа.
+## Возвращает {order, flaps: {i: [полигоны]}, base: [полигоны]}.
+func _split_sheet() -> Dictionary:
+	var order: Array = fold_order.duplicate()
+	for i in 4:
+		if not order.has(i):
+			order.append(i)
+	var remaining: Array = [_sheet_poly()]
+	var flaps := {}
+	for idx in order:
+		var i: int = idx
+		var pv := _flap_pivot(i)
+		var d := _flap_d(i)
+		var n := _flap_n(i)
+		var outer := _half_plane(pv, d, n, true)
+		var inner := _half_plane(pv, d, n, false)
+		var fl: Array = []
+		var rem2: Array = []
+		for poly in remaining:
+			for pp in Geometry2D.intersect_polygons(poly, outer):
+				fl.append(pp)
+			for pp2 in Geometry2D.intersect_polygons(poly, inner):
+				rem2.append(pp2)
+		flaps[i] = fl
+		remaining = rem2
+	return {"order": order, "flaps": flaps, "base": remaining}
+
+
+## Клапан приподнят на угол th: точки раскладываются вдоль линии сгиба и сжимаются поперёк (th = PI — лежит плоско, 0 — сложен).
+func _proj_poly(poly: PackedVector2Array, i: int, th: float) -> PackedVector2Array:
+	var pv := _flap_pivot(i)
+	var d := _flap_d(i)
+	var n := _flap_n(i)
+	var k := -cos(th)
+	var out := PackedVector2Array()
+	for p in poly:
+		var r := p - pv
+		out.append(pv + d * r.dot(d) + n * (r.dot(n) * k))
+	return out
+
+
+func _poly_bounds(poly: PackedVector2Array) -> Rect2:
+	var r := Rect2(poly[0], Vector2.ZERO)
+	for p in poly:
+		r = r.expand(p)
+	return r
+
+
+func _draw_poly_print(poly: PackedVector2Array, paper: Dictionary, clip: PackedVector2Array) -> void:
+	var r := _poly_bounds(poly)
+	if r.size.x < 0.5 or r.size.y < 0.5:
+		return
+	_draw_print(r, paper, r.position.x, 1.0, clip)
+
+
+func _shadow_poly(poly: PackedVector2Array, off: Vector2, alpha: float) -> void:
+	var o := PackedVector2Array()
+	for p in poly:
+		o.append(p + off)
+	draw_colored_polygon(o, Color(0, 0, 0, alpha))
+
+
+## Основа и клапаны, лежащие плашмя или приподнятые меньше чем до прямого угла (они под вещью).
+func _draw_poly_back(paper: Dictionary, clip_p: PackedVector2Array) -> void:
+	var sp := _split_sheet()
+	var shape_tuck := clip_p.size() >= 3
+	for poly in sp["base"]:
+		if _poly_area(poly) < 4.0:
+			continue
+		if shape_tuck:
+			_draw_poly_print(poly, paper, clip_p)
+		else:
+			_shadow_poly(poly, Vector2(5, 7), 0.22)
+			_draw_poly_print(poly, paper, poly)
+	for idx in sp["order"]:
+		var i: int = idx
+		var th := theta[i]
+		if cos(th) >= 0.0:
+			continue
+		var shade := lerpf(0.78, 1.0, clampf((th - PI * 0.5) / (PI * 0.5), 0.0, 1.0))
+		for poly in sp["flaps"][i]:
+			var pp := _proj_poly(poly, i, th)
+			if _poly_area(pp) < 4.0:
+				continue
+			_shadow_poly(pp, Vector2(4, 6), 0.18)
+			_draw_poly_print(pp, paper, pp)
+			draw_colored_polygon(pp, Color(0, 0, 0, 1.0 - shade))
+			U.stroke(self, pp, U.INK, 3.0, time, 1.0)
+
+
+## Клапаны, поднятые выше прямого угла или сложенные: лежат поверх вещи.
+func _draw_poly_front(paper: Dictionary, clip_p: PackedVector2Array) -> void:
+	var sp := _split_sheet()
+	var shape_tuck := clip_p.size() >= 3
+	for idx in sp["order"]:
+		var i: int = idx
+		var th := theta[i]
+		var ct := cos(th)
+		if ct < 0.0:
+			continue
+		for poly in sp["flaps"][i]:
+			var pp := _proj_poly(poly, i, th)
+			if _poly_area(pp) < 4.0:
+				continue
+			if shape_tuck:
+				_draw_poly_print(pp, paper, clip_p)
+			else:
+				_draw_poly_print(pp, paper, pp)
+				draw_colored_polygon(pp, Color(0, 0, 0, 0.10 + 0.20 * (1.0 - ct)))
+				U.stroke(self, pp, U.INK, 3.0, time, 1.0)
+
+
+## Где сейчас есть бумага (скотч и лента ложатся только на неё): основа плюс все клапаны, как они лежат, плюс допуск.
+func _paper_footprint() -> PackedVector2Array:
+	var sp := _split_sheet()
+	var polys: Array = []
+	for poly in sp["base"]:
+		polys.append(poly)
+	for idx in sp["order"]:
+		var i: int = idx
+		var th := 0.0 if folded[i] else theta[i]
+		for poly in sp["flaps"][i]:
+			polys.append(_proj_poly(poly, i, th))
+	var parts: Array = []
+	for p in polys:
+		if _poly_area(p) < 4.0:
+			continue
+		var cur: PackedVector2Array = p
+		var rest: Array = []
+		for q in parts:
+			var m := Geometry2D.merge_polygons(cur, q)
+			if m.size() == 1:
+				cur = m[0]
+			else:
+				rest.append(q)
+		rest.append(cur)
+		parts = rest
+	var best := PackedVector2Array()
+	var best_a := -1.0
+	for q2 in parts:
+		var a := _poly_area(q2)
+		if a > best_a:
+			best_a = a
+			best = q2
+	if best.size() < 3:
+		best = _sheet_poly()
+	var offs := Geometry2D.offset_polygon(best, STROKE_TOL, Geometry2D.JOIN_ROUND)
+	var src: PackedVector2Array = offs[0] if offs.size() > 0 else best
+	var out := PackedVector2Array()
+	for p3 in src:
+		out.append(p3.rotated(rot))
+	return out
 
 
 ## Вид во время вытяжки: лист по центру подарка, свободный конец идёт за курсором,
@@ -1495,27 +2104,36 @@ func _draw_pull_view(paper: Dictionary, ir: Rect2) -> void:
 ## швы слоёв бегут по поверхности, пока рулон откатывается.
 func _draw_roll_on_table(paper: Dictionary, u0: float, half_v: float, rt: float) -> void:
 	var r := Rect2(u0 - rt, -half_v, rt + 2.0, half_v * 2.0)
-	var cx := r.position.x + r.size.x * 0.5
-	var rad := maxf(rt * 0.5, 1.0)
-	var tube := Rect2(cx - rt * 0.24, r.position.y - 10.0, rt * 0.48, r.size.y + 20.0)
 	draw_rect(Rect2(r.position + Vector2(5, 6), r.size), Color(0, 0, 0, 0.28))
-	draw_rect(tube, Color("#d9c7a0"))
-	_rect_stroke(tube, 2.5)
-	_draw_print(r, paper, r.position.x, 1.0, PackedVector2Array())
-	draw_rect(Rect2(r.position.x, r.position.y, rt * 0.24, r.size.y), Color(0, 0, 0, 0.22))
-	draw_rect(Rect2(r.position.x + rt * 0.30, r.position.y, rt * 0.14, r.size.y), Color(1, 1, 1, 0.20))
-	draw_rect(Rect2(r.end.x - rt * 0.30, r.position.y, rt * 0.30, r.size.y), Color(0, 0, 0, 0.30))
+	_draw_roll_v(_roll_tex(paper), _roll_tint(paper), r.position.x, r.position.y, r.size.x, r.size.y)
+	# швы слоёв бегут по поверхности, пока рулон откатывается
+	var rad := maxf(rt * 0.5, 1.0)
+	var cx := r.position.x + r.size.x * 0.5
 	var ang0 := -pull_len * 0.5 / rad
 	for k in 5:
 		var a := TAU * float(k) / 5.0 + ang0
 		var c := cos(a)
 		if c > 0.1:
-			var lx := cx + rad * sin(a)
-			draw_line(Vector2(lx, r.position.y), Vector2(lx, r.end.y), Color(0, 0, 0, 0.18 * c), 1.5)
-	_rect_stroke(r, 3.5)
-	for sv in [-1.0, 1.0]:
-		var ey: float = r.position.y if sv < 0.0 else r.end.y
-		draw_line(Vector2(r.position.x, ey), Vector2(r.end.x, ey), U.INK, 3.0)
+			var lx := cx + rad * 0.8 * sin(a)
+			draw_line(Vector2(lx, r.position.y + 4.0), Vector2(lx, r.end.y - 4.0), Color(0, 0, 0, 0.16 * c), 1.5)
+
+
+## Рулон из спрайта по трём кускам: колпак с гильзой сверху, тянущееся тело, колпак с гильзой снизу.
+## Тело занимает [x0, x0 + w] x [y_top, y_top + body_h], гильзы торчат за его концы.
+func _draw_roll_v(tex: Texture2D, tint: Color, x0: float, y_top: float, w: float, body_h: float) -> void:
+	var k := w / ROLL_BODY_W
+	var tw := float(tex.get_width())
+	var th := float(tex.get_height())
+	var top_part := ROLL_SLICE_TOP - ROLL_BODY_TOP        # часть верхнего колпака, лежащая на теле
+	var bot_part := ROLL_BODY_BOT - ROLL_SLICE_BOT
+	var body := maxf(body_h, (top_part + bot_part) * k + 2.0)
+	var y_a0 := y_top - ROLL_BODY_TOP * k
+	var y_a1 := y_top + top_part * k
+	var y_c0 := y_top + body - bot_part * k
+	var y_c1 := y_top + body + (th - ROLL_BODY_BOT) * k
+	draw_texture_rect_region(tex, Rect2(x0, y_a0, tw * k, y_a1 - y_a0), Rect2(0, 0, tw, ROLL_SLICE_TOP), tint)
+	draw_texture_rect_region(tex, Rect2(x0, y_a1, tw * k, y_c0 - y_a1), Rect2(0, ROLL_SLICE_TOP, tw, ROLL_SLICE_BOT - ROLL_SLICE_TOP), tint)
+	draw_texture_rect_region(tex, Rect2(x0, y_c0, tw * k, y_c1 - y_c0), Rect2(0, ROLL_SLICE_BOT, tw, th - ROLL_SLICE_BOT), tint)
 
 
 func _draw_gift() -> void:
@@ -1541,6 +2159,7 @@ func _draw_gift() -> void:
 	var mt := fv * lean[2]
 	var mb := fv * lean[3]
 	var bw := minf(sheet_len, iw)
+	var poly_mode := _use_poly()
 
 	if step == Step.PULL and not paper.is_empty():
 		_draw_pull_view(paper, ir)
@@ -1551,7 +2170,9 @@ func _draw_gift() -> void:
 
 	# 1. основа листа и клапаны, ещё лежащие вбок (всё в системе координат бумаги)
 	_set_paper_transform()
-	if not paper.is_empty():
+	if not paper.is_empty() and poly_mode:
+		_draw_poly_back(paper, clip_p)
+	elif not paper.is_empty():
 		var base_r := Rect2(-bw * 0.5, -hh, bw, ih)
 		if clip_p.size() < 3:
 			draw_rect(Rect2(base_r.position + Vector2(5, 7), base_r.size), Color(0, 0, 0, 0.22))
@@ -1595,7 +2216,9 @@ func _draw_gift() -> void:
 
 	# 3. клапаны поверх вещи (виден рисунок бумаги)
 	_set_paper_transform()
-	if not paper.is_empty():
+	if not paper.is_empty() and poly_mode:
+		_draw_poly_front(paper, clip_p)
+	elif not paper.is_empty():
 		if fh > 0.0:
 			var order: Array = fold_order.duplicate()
 			for i in 2:
@@ -1656,10 +2279,23 @@ func _draw_gift() -> void:
 		_draw_tape_path(stroke_pts, 9.0)
 	for st in ribbon_strokes:
 		var rbs: Dictionary = Data.RIBBONS[int(st["ribbon"])]
-		_draw_ribbon_path(st["pts"], float(st["age"]), Color.html(rbs["color"]))
-	if stroking and stroke_kind == "ribbon" and stroke_pts.size() >= 2 and ribbon_idx >= 0:
+		_draw_ribbon_path(st["pts"], float(st["age"]), str(rbs["id"]))
+	if active_tool == "ribbon" and ribbon_idx >= 0 and step == Step.WRAP:
 		var rbc: Dictionary = Data.RIBBONS[ribbon_idx]
-		_draw_ribbon_path(stroke_pts, 9.0, Color.html(rbc["color"]))
+		if ribbon_anchored:
+			var tgt := _ribbon_target(mouse_pos)
+			var ok := _ribbon_piece_ok(ribbon_anchor, tgt)
+			var pv := PackedVector2Array([ribbon_anchor, ribbon_end_vis])
+			if ribbon_anchor.distance_to(ribbon_end_vis) > 2.0:
+				_draw_ribbon_path(pv, 9.0, str(rbc["id"]), 1.0 if ok else 0.45)
+			draw_circle(ribbon_anchor, 7.0, Color(1, 0.93, 0.55, 0.95))
+			draw_arc(ribbon_end_vis, 9.0 + 2.0 * sin(time * 8.0), 0.0, TAU, 20, Color(1, 0.93, 0.55) if ok else Color(1, 0.55, 0.5), 2.5)
+		else:
+			var sn := _edge_snap(mouse_pos - CENTER)
+			if float(sn["dist"]) <= RIBBON_PICK:
+				var gp: Vector2 = sn["pt"]
+				draw_circle(gp, 7.0 + 1.5 * sin(time * 6.0), Color(1, 0.93, 0.55, 0.9))
+				draw_arc(gp, 13.0, 0.0, TAU, 20, Color(1, 0.93, 0.55, 0.8), 2.0)
 	if _has_ribbon():
 		var last: Dictionary = Data.RIBBONS[int(ribbon_strokes[ribbon_strokes.size() - 1]["ribbon"])]
 		var bs := bow_size * maxf(U.ease_out_back(bow_pop), 0.01)

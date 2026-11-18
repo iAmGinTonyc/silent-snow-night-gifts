@@ -3,7 +3,7 @@ extends CanvasLayer
 
 const GRAIN_SHADER := """
 shader_type canvas_item;
-uniform float strength = 0.11;
+uniform float strength = 0.035;
 float hash(vec2 p) {
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
 	p3 += dot(p3, p3.yzx + 33.33);
@@ -13,7 +13,7 @@ void fragment() {
 	float t = floor(TIME * 12.0);
 	vec2 cell = floor(FRAGCOORD.xy / 2.0);
 	float n = hash(cell + vec2(t * 37.0, t * 17.0));
-	float scratch = step(0.9985, hash(vec2(floor(FRAGCOORD.x / 2.0), t))) * 0.10;
+	float scratch = step(0.9985, hash(vec2(floor(FRAGCOORD.x / 2.0), t))) * 0.03;
 	float a = abs(n - 0.5) * strength * 2.0 + scratch;
 	vec3 col = n > 0.5 ? vec3(1.0, 0.97, 0.9) : vec3(0.0);
 	COLOR = vec4(col, a);

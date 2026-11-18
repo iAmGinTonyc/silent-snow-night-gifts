@@ -10,8 +10,20 @@ const Hud = preload("res://scripts/hud.gd")
 const StatusBar = preload("res://scripts/status_bar.gd")
 const Fx = preload("res://scripts/fx.gd")
 const Economy = preload("res://scripts/economy.gd")
+const HandCursor = preload("res://scripts/hand_cursor.gd")
+const Stock = preload("res://scripts/stock.gd")
+const Story = preload("res://scripts/story.gd")
+const Dialogue = preload("res://scripts/dialogue.gd")
+const ReorderScreen = preload("res://scripts/reorder_screen.gd")
+const InspectScreen = preload("res://scripts/inspect_screen.gd")
 
 var econ
+var stock
+var dialogue
+var reorder
+var inspect
+var auto_play := false      # автотест: без диалогов и экранов выбора, заказ и приёмка идут сами
+var current_bad := ""       # скрытый брак у игрушки, которую выбрал клиент: "", "bad" или "sub"
 var tint
 var order_root
 var wrap_root
@@ -44,7 +56,7 @@ func _ready() -> void:
 	randomize()
 	econ = Economy.new()
 	tint = CanvasModulate.new()
-	tint.color = Color(1.0, 0.97, 0.9)
+	tint.color = Color(1.0, 0.985, 0.95)
 	add_child(tint)
 
 	order_root = Node2D.new()
@@ -74,8 +86,19 @@ func _ready() -> void:
 	add_child(hud)
 	status = StatusBar.new()
 	hud.add_child(status)
+	status.visible = false   # на экране заказа деньги и терпение показывают вывески сверху
 	fx = Fx.new()
 	add_child(fx)
+	stock = Stock.new()
+	dialogue = Dialogue.new()
+	add_child(dialogue)
+	reorder = ReorderScreen.new()
+	add_child(reorder)
+	inspect = InspectScreen.new()
+	add_child(inspect)
+	var cursor := HandCursor.new()
+	cursor.main = self
+	add_child(cursor)
 
 	order.input_enabled = false
 	wrap.input_enabled = false
@@ -85,6 +108,7 @@ func _ready() -> void:
 	wrap.gift_ready.connect(_on_gift_ready)
 	customer.arrived.connect(_on_customer_arrived)
 	order.offer_pressed.connect(_on_offer)
+	order.shelf_toggled.connect(func(open: bool): hud.set_hint("Click a gift to offer it (Esc goes back)" if open else "Click the shelf on the right to pick a gift"))
 	hud.start_pressed.connect(_start_game)
 	hud.next_pressed.connect(_on_next_evening)
 	hud.shop_pressed.connect(_on_shop_open)
@@ -99,6 +123,23 @@ func _ready() -> void:
 	bg.sky_target = bg.sky_color
 	var clock: Array = ev["clock"]
 	bg.set_clock_instant(float(clock[0]))
+
+
+var _click_flag := false
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_click_flag = true
+
+
+## Ждём указанное время, но клик пропускает ожидание (чтобы не томить на длинных репликах).
+func _wait_or_click(seconds: float) -> void:
+	_click_flag = false
+	var t := 0.0
+	while t < seconds and not _click_flag:
+		await get_tree().process_frame
+		t += get_process_delta_time()
 
 
 func _sync_counter() -> void:
@@ -119,7 +160,7 @@ func _sync_counter() -> void:
 		"cash": econ.balance,
 		"earned": int(econ.ledger["revenue"]) + int(econ.ledger["tips"]),
 		"spent": econ.expenses(),
-		"days": Data.EVENINGS.size() - evening_idx,
+		"days": Data.DAYS_TO_NEW_YEAR - evening_idx,
 	})
 
 
@@ -175,6 +216,8 @@ func _switch_to(which: String) -> void:
 func _start_game() -> void:
 	AudioSynth.start_music()
 	econ.reset()
+	stock.reset()
+	_sync_shelf()
 	_apply_inventory()
 	status.set_money(econ.balance, false)
 	tips_total = 0
@@ -199,6 +242,13 @@ func _begin_evening() -> void:
 	await get_tree().create_timer(2.4).timeout
 	if e != epoch:
 		return
+	if evening_idx == 0:
+		if not auto_play:
+			await dialogue.play(Story.INTRO)
+	else:
+		await _receive_deliveries(e)
+	if e != epoch:
+		return
 	_next_customer()
 
 
@@ -219,11 +269,24 @@ func _next_customer() -> void:
 
 
 func _on_customer_arrived() -> void:
+	var e := epoch
 	current_match = ""
 	chosen_item = ""
+	current_bad = ""
+	# Лор по ходу диалогов: короткие приветствия до мыслей клиента (первый гость рассказывает, что лавка появилась из ниоткуда).
+	if not auto_play:
+		var hello: Array = Story.HELLO.get(str(current["name"]), [])
+		for line in hello:
+			order.show_bubble(current["name"], str(line))
+			await _wait_or_click(1.0 + float(str(line).length()) * 0.05)
+			if e != epoch:
+				return
+	if str(current.get("scene", "")) == "santa":
+		await _santa_scene(e)
+		return
 	# Клиент всегда приходит с пустыми руками: мы читаем его мысли и предлагаем подарок с полки.
 	order.show_thought(current["name"], current["thought"])
-	hud.set_hint("We can read their mind: pick a gift from the shelf")
+	hud.set_hint("Click the shelf on the right to pick a gift")
 	order.input_enabled = true
 	order.set_offer(true)
 	patience = patience_max
@@ -237,22 +300,39 @@ func _on_customer_arrived() -> void:
 func _on_offer(offered: String) -> void:
 	var e := epoch
 	var ideal: String = current["ideal"]
-	var guessed := offered == ideal
+	var ideal_kind: String = Data.ITEMS[ideal]["kind"]
+	var guessed: bool = Data.ITEMS[offered]["kind"] == ideal_kind   # любой уровень игрушки нужного вида подходит
 	order.set_offer(false)
 	order.input_enabled = false
 	patience_paused = true
 	hud.set_hint("")
 	current_match = "perfect" if guessed else "miss"
-	chosen_item = ideal
+	if guessed:
+		chosen_item = offered
+	elif stock.infinite:
+		chosen_item = ideal
+	else:
+		chosen_item = stock.pick_for_kind(ideal_kind)   # клиент выбирает сам: нужный вид, иначе что осталось
 	if not guessed:
 		order.show_bubble(current["name"], str(Data.BUYER_LINES["miss"]))
 		AudioSynth.play_sfx("dull")
 		await get_tree().create_timer(2.2).timeout
 		if e != epoch:
 			return
-	var it: Dictionary = Data.ITEMS[ideal]
-	_on_cost("stock", int(it["stock"]))
-	order.give_item(ideal)
+	if chosen_item == "":
+		customer.set_mood(0)
+		order.show_bubble(current["name"], "Oh... the shelf is empty. Maybe next time.")
+		await get_tree().create_timer(2.8).timeout
+		if e != epoch:
+			return
+		status.show_patience(false)
+		patience_on = false
+		patience_paused = false
+		await _customer_leaves(e)
+		return
+	current_bad = stock.take(chosen_item)
+	_sync_shelf()
+	order.give_item(chosen_item)
 	if guessed:
 		customer.set_mood(2)
 		order.show_bubble(current["name"], str(Data.BUYER_LINES["perfect"]))
@@ -275,8 +355,8 @@ func _on_offer(offered: String) -> void:
 	await _switch_to("wrap")
 	if e != epoch:
 		return
-	wrap.set_ticket(current["name"], Data.ticket_lines(current, ideal))
-	wrap.place_item(ideal)
+	wrap.set_ticket(current["name"], Data.ticket_lines(current, chosen_item))
+	wrap.place_item(chosen_item)
 	wrap.input_enabled = true
 	patience_paused = false
 
@@ -331,9 +411,21 @@ func _on_gift_ready(res: Dictionary) -> void:
 	var item_id: String = res["look"]["item_id"]
 	var neat: float = res["neat"]
 
+	# игрушка с браком, который мы пропустили при приёмке: клиент замечает поломку и ничего не платит
+	if current_bad != "":
+		customer.set_mood(0)
+		order.show_bubble(current["name"], "Wait... this toy is broken! I cannot take it, sorry.")
+		AudioSynth.play_sfx("dull")
+		await get_tree().create_timer(3.2).timeout
+		if e != epoch:
+			return
+		order.clear_gift()
+		await _customer_leaves(e)
+		return
+
 	# чем кривее подарок, тем выше шанс, что клиент расстроится
 	var outcome := "pay"
-	if neat < 0.7:
+	if neat < 0.7 and str(current.get("scene", "")) == "":
 		var roll := randf()
 		var can_redo := redo_count < 1
 		if neat >= 0.4:
@@ -373,7 +465,7 @@ func _on_gift_ready(res: Dictionary) -> void:
 		return
 
 	var it: Dictionary = Data.ITEMS[item_id]
-	var pay: int = int(it["sell"])
+	var pay: int = int(it.get("sell", it["price"]))
 	econ.earn(pay)
 	status.set_money(econ.balance)
 	order.pay_pop()
@@ -409,6 +501,13 @@ func _on_gift_ready(res: Dictionary) -> void:
 		line = current["meh"]
 		mood = mini(mood, 1)
 	customer.set_mood(mood)
+	if str(current.get("scene", "")) == "santa":
+		if not auto_play:
+			await dialogue.play(Story.SANTA_BYE, _santa_face)
+		customer.face_override = -1
+		order.clear_gift()
+		await _customer_leaves(e)
+		return
 	order.show_bubble(current["name"], line)
 	if tips > 0:
 		order.add_tip_coins(tips)
@@ -486,15 +585,113 @@ func _end_evening() -> void:
 	order.input_enabled = false
 	var summary: Dictionary = econ.close_evening()
 	status.set_money(econ.balance)
+	hud.show_summary(summary, econ.balance, evening_idx + 1, Data.EVENINGS.size())
+
+
+## «Next» в итогах вечера: после ночи 1 на полке остаётся по 2 штуки, потом заказ игрушек и следующая ночь.
+## После последней ночи демки показываем финальную карточку.
+func _on_next_evening() -> void:
 	if evening_idx >= Data.EVENINGS.size() - 1:
 		_final()
-	else:
-		hud.show_summary(summary, econ.balance, evening_idx + 1, Data.EVENINGS.size())
-
-
-func _on_next_evening() -> void:
+		return
+	if evening_idx == 0:
+		stock.start_real_stock()
+	_sync_shelf()
+	await _order_toys()
 	evening_idx += 1
 	_begin_evening()
+
+
+func _order_toys() -> void:
+	var e := epoch
+	if auto_play:
+		# автотест: берём у обоих поставщиков по несколько игрушек
+		stock.place_order("jolly", {"bear": 1, "ball": 2, "train": 1}, evening_idx)
+		if evening_idx == 0:
+			stock.place_order("frost", {"ornament": 2, "bear": 2, "ball_mid": 1}, evening_idx)
+		return
+	reorder.open(stock, evening_idx, Data.EVENINGS.size() - 1, econ.balance, evening_idx == 0)
+	var spent: int = await reorder.finished
+	if e != epoch:
+		return
+	if spent > 0:
+		_on_cost("stock", spent)
+
+
+## Ящики, которые приехали перед этой ночью: проверяем игрушки и отправляем брак обратно.
+func _receive_deliveries(e: int) -> void:
+	for o in stock.due(evening_idx):
+		var units: Array = stock.roll_delivery(o)
+		if auto_play:
+			var back: Array = []
+			for i in units.size():
+				if str(units[i]["defect"]) == "bad":
+					back.append(i)
+			var r: Dictionary = stock.finish_inspection(o, units, back)
+			econ.refund(int(r["refund"]))
+			continue
+		AudioSynth.play_sfx("door")
+		inspect.open(stock, o, units, stock.deliveries_done == 0)
+		var res: Dictionary = await inspect.finished
+		if e != epoch:
+			return
+		if int(res["refund"]) > 0:
+			econ.refund(int(res["refund"]))
+			status.set_money(econ.balance)
+	_sync_shelf()
+
+
+## Что сейчас лежит на полке: простые игрушки всегда (серые, если кончились), средние только пока они есть.
+func _stock_counts() -> Dictionary:
+	var d := {}
+	for id in stock.all_ids():
+		var n: int = stock.count(id)
+		if Data.STOCK.has(id) or n > 0:
+			d[id] = n
+	return d
+
+
+## Ночь 1: на полке бесконечно (set_stock не вызываем), потом показываем настоящий запас.
+func _sync_shelf() -> void:
+	if not order.has_method("set_stock"):
+		return
+	if stock.infinite:
+		order.stock_set = false
+	else:
+		order.set_stock(_stock_counts())
+
+
+func _santa_face(d: Dictionary) -> void:
+	customer.face_override = int(d.get("face", 2))
+
+
+## Конец ночи 3: приходит Санта, разговор, потом пустая коробка в подарок.
+func _santa_scene(e: int) -> void:
+	order.hide_bubble()
+	hud.set_hint("")
+	if not auto_play:
+		await dialogue.play(Story.SANTA, _santa_face)
+		if e != epoch:
+			return
+	customer.face_override = 2
+	order.show_bubble(current["name"], str(current["pack"]))
+	await get_tree().create_timer(0.2 if auto_play else 2.8).timeout
+	if e != epoch:
+		return
+	order.hide_bubble()
+	current_match = "perfect"
+	chosen_item = str(current["ideal"])
+	patience = patience_max
+	patience_on = true
+	status.show_patience(true)
+	status.set_patience(1.0, patience_max)
+	await _switch_to("wrap")
+	if e != epoch:
+		return
+	wrap.set_ticket(current["name"], Data.ticket_lines(current, chosen_item))
+	wrap.place_item(chosen_item)
+	wrap.input_enabled = true
+	patience_paused = false
 
 
 func _on_shop_open() -> void:
@@ -518,18 +715,8 @@ func _on_buy(idx: int) -> void:
 
 
 func _final() -> void:
-	var e := epoch
-	bg.set_clock(1440.0)
 	hud.set_hint("")
-	for i in 16:
-		bg.spawn_firework()
-		light.spawn_firework()
-		AudioSynth.play_sfx("pop")
-		await get_tree().create_timer(randf_range(0.45, 0.9)).timeout
-		if e != epoch:
-			return
-		if i == 4:
-			hud.show_final(econ.balance, tips_total)
+	hud.show_final(econ.balance, tips_total)
 
 
 func _restart() -> void:
@@ -539,6 +726,8 @@ func _restart() -> void:
 	customer_idx = 0
 	tips_total = 0
 	econ.reset()
+	stock.reset()
+	_sync_shelf()
 	_apply_inventory()
 	status.set_money(econ.balance, false)
 	status.show_patience(false)

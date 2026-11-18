@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cj64ucxrud23f"
-path="res://.godot/imported/stand.png-fce99febb5fd6eae9f51f9dd3340f828.ctex"
+uid="uid://ng1363ie0rxk"
+path="res://.godot/imported/roll_neutral.png-9bb9cd0a2a8714dfcd1cd7b4f3459079.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://art/shop/stand.png"
-dest_files=["res://.godot/imported/stand.png-fce99febb5fd6eae9f51f9dd3340f828.ctex"]
+source_file="res://art/wrap/roll_neutral.png"
+dest_files=["res://.godot/imported/roll_neutral.png-9bb9cd0a2a8714dfcd1cd7b4f3459079.ctex"]
 
 [params]
 

@@ -40,6 +40,11 @@ func earn(amount: int) -> void:
 	ledger["revenue"] = int(ledger["revenue"]) + amount
 
 
+## Возврат денег за бракованные игрушки поставщику.
+func refund(amount: int) -> void:
+	balance += amount
+
+
 func spend(category: String, amount: int) -> void:
 	balance -= amount
 	ledger[category] = int(ledger[category]) + amount

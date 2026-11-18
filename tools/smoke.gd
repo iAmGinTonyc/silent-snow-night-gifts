@@ -26,7 +26,7 @@ func wait_until(cond: Callable, timeout_s: float, label: String) -> bool:
 
 
 ## Заворачивает подарок на столе: идеально или криво.
-func wrap_gift(perfect: bool, vertical: bool) -> bool:
+func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 	var w = main.wrap
 	var ok := await wait_until(func(): return w.step == w.Step.CHOOSE or w.step == w.Step.PAPER, 30.0, "wrap ready")
 	if not ok:
@@ -61,7 +61,24 @@ func wrap_gift(perfect: bool, vertical: bool) -> bool:
 	await process_frame
 	w._select_tool("ruler")
 	w._select_tool("scissors")
-	w._do_cut(w.CENTER + Vector2(-w.pull_len * 0.5 + 30.0, 0.0).rotated(w.rot))
+	if skew:
+		# разметка линейкой и косой разрез рукой: от верхнего края листа к нижнему со сдвигом вдоль листа
+		var y_edge: float = w._across() * 0.5 + w.MARGIN
+		var u_cut: float = -w.pull_len * 0.5 + 40.0
+		w.ruler_a = w.CENTER + Vector2(u_cut - 18.0, -y_edge).rotated(w.rot)
+		w.ruler_b = w.CENTER + Vector2(u_cut + 18.0, y_edge).rotated(w.rot)
+		w._set_cut_mark()
+		var pa := Vector2(u_cut - 18.0, -y_edge - 4.0)
+		var pb := Vector2(u_cut + 18.0, y_edge + 4.0)
+		w._cut_begin(w.CENTER + pa.rotated(w.rot))
+		for k in range(1, 11):
+			w._cut_move(w.CENTER + pa.lerp(pb, float(k) / 10.0).rotated(w.rot))
+		w._cut_end()
+		if absf(w.cut_skew) < 5.0:
+			print("   skewed cut did not register, skew=", w.cut_skew)
+			failed = true
+	else:
+		w._do_cut(w.CENTER + Vector2(-w.pull_len * 0.5 + 30.0, 0.0).rotated(w.rot))
 	await create_timer(0.6).timeout
 	if w.step != w.Step.WRAP:
 		print("   cut failed, step=", w.step)
@@ -76,7 +93,12 @@ func wrap_gift(perfect: bool, vertical: bool) -> bool:
 		var a: Vector2 = starts[i]
 		var b: Vector2 = ends[i]
 		w._begin_flap_drag(w.CENTER + a.rotated(w.rot))
+		if skew and i == 0:
+			b += Vector2(0.0, 44.0)   # тянем клапан вбок: загиб по диагонали
 		w._update_flap_drag(w.CENTER + b.rotated(w.rot))
+		if skew and i == 0 and absf(w.tilt[0]) < 0.01:
+			print("   flap did not tilt")
+			failed = true
 		if w.flap_drag < 0:
 			print("   flap ", i, " was not picked")
 			failed = true
@@ -100,18 +122,14 @@ func wrap_gift(perfect: bool, vertical: bool) -> bool:
 			failed = true
 		if main.current.get("ribbon", "any") != "none":
 			w._select_ribbon_tool(0)
-			w._begin_stroke(w.CENTER + Vector2(-w.item_w * 0.45, 4.0))
-			xx = -w.item_w * 0.45
-			while xx < w.item_w * 0.45:
-				xx += 10.0
-				w._move_stroke(w.CENTER + Vector2(xx, 4.0))
-			w._end_stroke()
-			w._begin_stroke(w.CENTER + Vector2(4.0, -w.item_h * 0.45))
-			var yy: float = -w.item_h * 0.45
-			while yy < w.item_h * 0.45:
-				yy += 10.0
-				w._move_stroke(w.CENTER + Vector2(4.0, yy))
-			w._end_stroke()
+			# лента кладётся двумя щелчками: край подарка, потом противоположный край
+			w._ribbon_press(w.CENTER + Vector2(-w.item_w * 0.5 - 2.0, 4.0))
+			if not w.ribbon_anchored:
+				print("   ribbon did not anchor at the edge")
+				failed = true
+			w._ribbon_press(w.CENTER + Vector2(w.item_w * 0.5 + 2.0, 4.0))
+			w._ribbon_press(w.CENTER + Vector2(4.0, -w.item_h * 0.5 - 2.0))
+			w._ribbon_press(w.CENTER + Vector2(4.0, w.item_h * 0.5 + 2.0))
 			if not w._has_ribbon():
 				print("   ribbon not drawn")
 				failed = true
@@ -125,11 +143,12 @@ func wrap_gift(perfect: bool, vertical: bool) -> bool:
 func run() -> void:
 	await process_frame
 	Engine.time_scale = 3.0
+	main.auto_play = true   # без диалогов и экранов выбора: история и поставки проверяет tools/smoke.gd
 	main._start_game()
 	var served := 0
 	var crooked_done := false
 	while served < 30:
-		var ok := await wait_until(func(): return (main.customer.state == "idle" and main.order.offer_enabled) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
+		var ok := await wait_until(func(): return (main.customer.state == "idle" and main.order.offer_enabled) or (str(main.current.get("scene", "")) == "santa" and main.screen == "wrap" and main.wrap.input_enabled) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
 		if not ok:
 			break
 		if main.hud.final_root.visible:
@@ -151,16 +170,30 @@ func run() -> void:
 		var ideal: String = main.current["ideal"]
 		var guessed := served % 3 != 1
 		print("--- ", cname, " ideal=", ideal, " guess=", guessed)
-		var pick := ideal
+		var pick: String = ideal
+		if not main.stock.infinite:
+			# после ночи 1 на полке только то, что заказали: берём игрушку нужного вида, иначе любую
+			var avail: Array = main.stock.available_ids()
+			var same := ""
+			for id in avail:
+				if main.Data.ITEMS[id]["kind"] == main.Data.ITEMS[ideal]["kind"]:
+					same = id
+			if same != "":
+				pick = same
+			elif avail.size() > 0:
+				pick = avail[0]
 		if not guessed:
 			pick = "bear" if ideal != "bear" else "ornament"
-		main._on_offer(pick)
+			if not main.stock.infinite and not main.stock.available_ids().has(pick):
+				pick = main.stock.available_ids()[0] if main.stock.available_ids().size() > 0 else pick
+		if str(main.current.get("scene", "")) != "santa":
+			main._on_offer(pick)
 		var perfect := crooked_done or served != 2
 		crooked_done = crooked_done or not perfect
 		var attempts := 0
 		while true:
 			attempts += 1
-			ok = await wrap_gift(perfect or attempts > 1, served % 2 == 1)
+			ok = await wrap_gift(perfect or attempts > 1, served % 2 == 1, served % 4 == 3 and (perfect or attempts > 1))
 			if not ok:
 				break
 			served += 0
@@ -169,6 +202,6 @@ func run() -> void:
 				break
 			print("   клиент просит переделать, попытка ", attempts + 1)
 		served += 1
-		print("   balance=", main.econ.balance, " tips_total=", main.tips_total)
+		print("   balance=", main.econ.balance, " tips_total=", main.tips_total, " stock=", main._stock_counts())
 	print("DONE served=", served, " failed=", failed)
 	quit()
