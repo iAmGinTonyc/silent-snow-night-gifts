@@ -23,6 +23,8 @@ const SPRITE_IDS := {
 	"The Murphy family": "murphy", "Jin": "jin", "Mrs. Fernandez": "fernandez", "Sasha": "sasha",
 	"Mr. Al-Rashid": "alrashid", "Lucia": "lucia", "Dona Rosa from upstairs": "rosa",
 }
+const ANGRY_FACE := 7         # восьмой кадр: клиент кричит и ругается (жалоба после смены); у Санты его нет
+const ANGRY_FALLBACK := 1     # без злого кадра берём сердитый кадр 1
 const SPRITE_H := 224.0       # высота спрайта в единицах узла (узел ещё масштабируется)
 const SPRITE_BASE_Y := 350.0  # нижний срез спрайта прячется за прилавком
 const FACE_FPS := 14.0        # сколько кадров лица в секунду проходит анимация
@@ -95,6 +97,9 @@ func _load_sprite(cname: String) -> Array:
 			frames = []
 			break
 		frames.append(load(path))
+	var angry := "res://art/customers/%s_%d.png" % [id, ANGRY_FACE]
+	if frames.size() == 7 and ResourceLoader.exists(angry):
+		frames.append(load(angry))
 	_sprite_cache[id] = frames
 	return frames
 
@@ -106,7 +111,7 @@ func talk_for(sec: float) -> void:
 
 func _face_target() -> int:
 	if face_override >= 0:
-		return face_override
+		return face_override if face_override < sprite.size() else ANGRY_FALLBACK
 	if talking_left > 0.0:
 		return 5 if fmod(time * 7.0, 1.0) < 0.5 else 4
 	if reacted:
@@ -148,7 +153,11 @@ func _process(delta: float) -> void:
 		blink_in = randf_range(2.5, 5.0)
 	blinking = maxf(blinking - delta, 0.0)
 	if not sprite.is_empty():
-		face = move_toward(face, float(_face_target()), FACE_FPS * delta)
+		var target := _face_target()
+		if target == ANGRY_FACE or int(roundf(face)) == ANGRY_FACE:
+			face = float(target)   # злой кадр стоит отдельно от ряда «тревога → смех», к нему без перелистывания
+		else:
+			face = move_toward(face, float(target), FACE_FPS * delta)
 	if state == "entering":
 		t_state += delta / 1.1
 		x_off = ENTER_X * (1.0 - U.ease_out_back(minf(t_state, 1.0)))
@@ -216,7 +225,7 @@ func _draw() -> void:
 	# лицо (плавно идёт по 7 кадрам), а блестки радости появляются и гаснут
 	if not sprite.is_empty():
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		var tex: Texture2D = sprite[clampi(int(roundf(face)), 0, 6)]
+		var tex: Texture2D = sprite[clampi(int(roundf(face)), 0, sprite.size() - 1)]
 		var k := SPRITE_H / float(tex.get_height())
 		var sz := Vector2(tex.get_width(), tex.get_height()) * k
 		draw_texture_rect(tex, Rect2(Vector2(-sz.x * 0.5, SPRITE_BASE_Y - sz.y), sz), false)

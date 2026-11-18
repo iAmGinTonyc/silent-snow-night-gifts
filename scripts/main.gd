@@ -698,11 +698,11 @@ func _complaint_scene(e: int) -> void:
 		current = who
 		AudioSynth.play_sfx("door")
 		customer.arrive(who)
+		customer.face_override = customer.ANGRY_FACE   # входит уже злым
 		await customer.arrived
 		if e != epoch:
 			complaint_mode = false
 			return
-		customer.face_override = 0   # отдельного «злого» кадра нет, берём самое расстроенное лицо
 		var toy := str(Data.ITEMS[str(c["item"])]["name"]).to_lower()
 		var pool: Array = Story.COMPLAINT_BAD if str(c["defect"]) == "bad" else Story.COMPLAINT_SUB
 		var line := str(pool[randi() % pool.size()]).replace("{toy}", toy).replace("{pay}", str(pay))

@@ -26,7 +26,7 @@ body {
 	position: fixed;
 	inset: 0;
 	color: white;
-	background-color: #0e1432;
+	background-color: #1a110c;
 	overflow: hidden;
 	touch-action: none;
 	overscroll-behavior: none;
@@ -37,12 +37,71 @@ body {
 	-webkit-text-size-adjust: 100%;
 }
 
+/* Игра всегда 16:9 по центру, размер холста ставит скрипт ниже (layoutGame). */
 #canvas {
 	display: block;
+	position: absolute;
+	left: 0;
+	top: 0;
+	box-shadow: 0 0 26px 4px rgba(0, 0, 0, 0.6);
 }
 
 #canvas:focus {
 	outline: none;
+}
+
+/* Рисунки по краям вместо чёрных полос: стенки слева и справа (телефоны), гирлянда сверху и полка снизу
+   (планшеты). Каждая картинка прижата к краю игры, лишнее срезается с внешней стороны. */
+.edge {
+	position: absolute;
+	display: none;
+	overflow: hidden;
+	pointer-events: none;
+	background-color: #1a110c;
+	background-repeat: no-repeat;
+	background-size: cover;
+}
+
+.edge::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+}
+
+#edge-left {
+	background-image: url('edge_left.jpg');
+	background-position: right center;
+}
+
+#edge-left::after {
+	background: linear-gradient(to left, rgba(12, 7, 4, 0) 45%, rgba(12, 7, 4, 0.5));
+}
+
+#edge-right {
+	background-image: url('edge_right.jpg');
+	background-position: left center;
+}
+
+#edge-right::after {
+	background: linear-gradient(to right, rgba(12, 7, 4, 0) 45%, rgba(12, 7, 4, 0.5));
+}
+
+#edge-top {
+	background-image: url('edge_top.jpg');
+	background-position: center bottom;
+}
+
+#edge-top::after {
+	background: linear-gradient(to top, rgba(12, 7, 4, 0) 50%, rgba(12, 7, 4, 0.45));
+}
+
+#edge-bottom {
+	background-image: url('edge_bottom.jpg');
+	background-position: center top;
+}
+
+#edge-bottom::after {
+	background: linear-gradient(to bottom, rgba(12, 7, 4, 0) 50%, rgba(12, 7, 4, 0.45));
 }
 
 /* Сообщения об ошибках (старые браузеры и так далее) остаются от стандартной страницы Godot. */
@@ -292,6 +351,11 @@ body.portrait #rotate {
 		$GODOT_HEAD_INCLUDE
 	</head>
 	<body>
+		<div class="edge" id="edge-left" aria-hidden="true"></div>
+		<div class="edge" id="edge-right" aria-hidden="true"></div>
+		<div class="edge" id="edge-top" aria-hidden="true"></div>
+		<div class="edge" id="edge-bottom" aria-hidden="true"></div>
+
 		<canvas id="canvas">
 			Your browser does not support the canvas tag.
 		</canvas>
@@ -335,6 +399,68 @@ const engine = new Engine(GODOT_CONFIG);
 	const bar = document.getElementById('loader-bar');
 	const fill = document.getElementById('loader-fill');
 	const text = document.getElementById('loader-text');
+
+	// --- Игра 16:9 по центру, по краям рисунки ---
+	// Движок сам холст не растягивает (canvas_resize_policy = 0 в export_presets.cfg): размер в пикселях
+	// и место на странице задаём здесь, движок каждый кадр сверяется с canvas.width/height.
+	// Плотность пикселей не выше 2, чтобы телефонам с плотностью 3 не рисовать лишнее.
+	const GAME_RATIO = 1280 / 720;
+	const MAX_DPR = 2;
+	const canvasEl = document.getElementById('canvas');
+	const edges = {
+		left: document.getElementById('edge-left'),
+		right: document.getElementById('edge-right'),
+		top: document.getElementById('edge-top'),
+		bottom: document.getElementById('edge-bottom'),
+	};
+	function placeEdge(el, show, x, y, w, h) {
+		if (!show || w < 1 || h < 1) {
+			el.style.display = 'none';
+			return;
+		}
+		el.style.display = 'block';
+		el.style.left = x + 'px';
+		el.style.top = y + 'px';
+		el.style.width = w + 'px';
+		el.style.height = h + 'px';
+	}
+	function layoutGame() {
+		const vw = window.innerWidth;
+		const vh = window.innerHeight;
+		const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+		let w = vw;
+		let h = vw / GAME_RATIO;
+		if (h > vh) {
+			h = vh;
+			w = vh * GAME_RATIO;
+		}
+		const pw = Math.max(1, Math.round(w * dpr));
+		const ph = Math.max(1, Math.round(h * dpr));
+		const cw = pw / dpr;
+		const ch = ph / dpr;
+		const x = Math.round((vw - cw) / 2 * dpr) / dpr;
+		const y = Math.round((vh - ch) / 2 * dpr) / dpr;
+		canvasEl.style.left = x + 'px';
+		canvasEl.style.top = y + 'px';
+		canvasEl.style.width = cw + 'px';
+		canvasEl.style.height = ch + 'px';
+		if (canvasEl.width !== pw || canvasEl.height !== ph) {
+			canvasEl.width = pw;   // новое значение очищает холст, поэтому только при изменении
+			canvasEl.height = ph;
+		}
+		const sides = x >= 1;
+		const bands = y >= 1;
+		placeEdge(edges.left, sides, 0, 0, x, vh);
+		placeEdge(edges.right, sides, x + cw, 0, vw - x - cw, vh);
+		placeEdge(edges.top, bands, 0, 0, vw, y);
+		placeEdge(edges.bottom, bands, 0, y + ch, vw, vh - y - ch);
+		window.__ssngLayout = { x: x, y: y, w: cw, h: ch, pw: pw, ph: ph, vw: vw, vh: vh };   // для проверки
+	}
+	layoutGame();
+	window.addEventListener('resize', layoutGame);
+	if (window.visualViewport) {
+		window.visualViewport.addEventListener('resize', layoutGame);
+	}
 
 	// --- Телефон и планшет: только горизонтально ---
 	// Вертикально: показываем просьбу повернуть экран и ставим window.__ssngPortrait (игра встаёт на паузу,
@@ -384,7 +510,10 @@ const engine = new Engine(GODOT_CONFIG);
 	}, true);
 	window.addEventListener('resize', updateOrientation);
 	window.addEventListener('orientationchange', function () {
-		setTimeout(updateOrientation, 200);
+		setTimeout(function () {
+			layoutGame();
+			updateOrientation();
+		}, 200);
 	});
 	document.addEventListener('contextmenu', function (ev) {
 		if (isTouchDevice()) {
