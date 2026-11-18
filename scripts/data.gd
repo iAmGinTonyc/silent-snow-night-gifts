@@ -123,6 +123,7 @@ const EVENINGS := [
 			},
 			{
 				"name": "Leo", "paper": "any", "ribbon": "any", "bow": "big", "wrap": "free",
+				"ask_free": "I counted my coins three times... it is not enough. Could you give it to me for free? It is for my mom.",
 				"ideal": "ball",
 				"coat": "#c94f4f", "skin": "#c68b62", "hair": "#2a1d16", "hat": "beanie", "hatc": "#3a7bd5",
 				"thought": "It is for my mom. She says she was the best goalkeeper on our street when she was young. I have only a few coins, but I want her to feel it again.",
@@ -212,6 +213,7 @@ const EVENINGS := [
 			},
 			{
 				"name": "Granny Zeynep", "paper": "any", "ribbon": "any", "bow": "any", "wrap": "free",
+				"ask_free": "Oh dear, my pension is late this month. Could you let me have it for free, for little Timur?",
 				"ideal": "train",
 				"coat": "#7a4b6e", "skin": "#d7b08a", "hair": "#cfcfd8", "hat": "hijab", "hatc": "#4a7f8a",
 				"thought": "My grandson Timur is five. Anything that hums and runs on rails is a miracle to him. He stands at the window for hours waiting for the train.",
@@ -251,6 +253,7 @@ const EVENINGS := [
 			},
 			{
 				"name": "Jin", "paper": "any", "ribbon": "any", "bow": "any", "wrap": "free",
+				"ask_free": "Sorry... I spent everything on the ticket home. Could I have it for free? I will pay you back someday.",
 				"ideal": "ornament",
 				"coat": "#37a37a", "skin": "#ecd0b0", "hair": "#14100e", "hat": "beanie", "hatc": "#f2f2f2",
 				"thought": "My dorm room is gray and bare. I bought a tiny tree but it has nothing to hang on it. Anything beautiful will do.",

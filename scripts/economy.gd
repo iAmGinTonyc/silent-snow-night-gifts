@@ -32,12 +32,19 @@ func _source(kind: String) -> Array:
 
 
 func new_evening() -> void:
-	ledger = {"revenue": 0, "tips": 0, "paper": 0, "waste": 0, "tape": 0, "ribbon": 0, "box": 0, "stock": 0, "complaint": 0, "complaint_n": 0}
+	ledger = {"revenue": 0, "tips": 0, "paper": 0, "waste": 0, "tape": 0, "ribbon": 0, "box": 0, "stock": 0, "complaint": 0, "complaint_n": 0,
+		"deposits": 0, "deposit_back": 0}
 
 
 func earn(amount: int) -> void:
 	balance += amount
 	ledger["revenue"] = int(ledger["revenue"]) + amount
+
+
+## Задаток за предзаказ: деньги в кассе сразу, в итогах ночи отдельной строкой.
+func earn_deposit(amount: int) -> void:
+	balance += amount
+	ledger["deposits"] = int(ledger["deposits"]) + amount
 
 
 ## Возврат денег за бракованные игрушки поставщику.
@@ -56,7 +63,7 @@ func add_tip(n: int) -> void:
 
 func expenses() -> int:
 	var s := 0
-	for k in ["paper", "waste", "tape", "ribbon", "box", "stock", "complaint"]:
+	for k in ["paper", "waste", "tape", "ribbon", "box", "stock", "complaint", "deposit_back"]:
 		s += int(ledger[k])
 	return s
 
@@ -65,7 +72,7 @@ func expenses() -> int:
 func close_evening() -> Dictionary:
 	var out := ledger.duplicate()
 	out["expenses"] = expenses()
-	out["net"] = int(ledger["revenue"]) + int(ledger["tips"]) - expenses()
+	out["net"] = int(ledger["revenue"]) + int(ledger["deposits"]) + int(ledger["tips"]) - expenses()
 	balance += int(ledger["tips"])
 	return out
 

@@ -27,6 +27,7 @@ var reason_label: Label
 var place_btn: Button
 var row_refs: Array = []   # {id, vals: {sid: Label}, plus: {sid: Button}, minus: {sid: Button}}
 var col_open := {}         # sid -> bool: успевает ли заказ до конца демки
+var preorders: Array = []  # предзаказы на следующую ночь: {who, item, ...}; напоминание в подписи
 var _tex_cache := {}
 
 
@@ -48,8 +49,9 @@ func _sprite(id: String) -> Texture2D:
 	return tex
 
 
-func open(stock_ref, night_idx: int, last_night_idx: int, cash_now: int, tutorial: bool) -> void:
+func open(stock_ref, night_idx: int, last_night_idx: int, cash_now: int, tutorial: bool, preorders_next: Array = []) -> void:
 	stock = stock_ref
+	preorders = preorders_next
 	night = night_idx
 	last_night = last_night_idx
 	cash = cash_now
@@ -78,7 +80,12 @@ func _build(tutorial: bool) -> void:
 	var note := "Night %d is over. Orders arrive before the night shown on each supplier." % (night + 1)
 	if tutorial:
 		note = "Night one is over. From now on the shelf holds only what we have: 2 of each toy. Order more before the next night!"
-	note_label = UI.label(note, 20, Color(0.92, 0.84, 0.7), Vector2(80, 92), Vector2(1120, 56), HORIZONTAL_ALIGNMENT_LEFT)
+	if not preorders.is_empty():
+		var asks: Array = []
+		for po in preorders:
+			asks.append("%s: %s" % [str(po["who"]["name"]), str(Data.ITEMS[str(po["item"])]["name"]).to_lower()])
+		note = "Pre-orders, they come back tomorrow: %s. Only Jolly Jingle delivers in one night!" % ", ".join(asks)
+	note_label = UI.label(note, 20, Color(1.0, 0.86, 0.55) if not preorders.is_empty() else Color(0.92, 0.84, 0.7), Vector2(80, 92), Vector2(1120, 56), HORIZONTAL_ALIGNMENT_LEFT)
 	note_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(note_label)
 

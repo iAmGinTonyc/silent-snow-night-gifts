@@ -222,6 +222,8 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 
 
 var complaint_forced := false
+var preorder_forced := false     # ночь 2: поезда убраны с полки, клиент оставляет задаток
+var preorder_back_seen := false  # ночь 3: он вернулся первым и получил свой поезд
 
 
 func run() -> void:
@@ -233,7 +235,7 @@ func run() -> void:
 	var served := 0
 	var crooked_done := false
 	while served < 30:
-		var ok := await wait_until(func(): return (main.customer.state == "idle" and main.order.offer_enabled) or (str(main.current.get("scene", "")) == "santa" and main.screen == "wrap" and main.wrap.input_enabled) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
+		var ok := await wait_until(func(): return (main.customer.state == "idle" and main.order.offer_enabled) or ((str(main.current.get("scene", "")) == "santa" or main.current.has("preorder")) and main.screen == "wrap" and main.wrap.input_enabled) or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "next customer")
 		if not ok:
 			break
 		if main.hud.final_root.visible:
@@ -241,6 +243,12 @@ func run() -> void:
 			break
 		if main.hud.summary_root.visible:
 			print("EVENING END. balance=", main.econ.balance, " ledger=", main.econ.ledger)
+			if main.evening_idx == 1 and preorder_forced and int(main.econ.ledger.get("deposits", 0)) <= 0:
+				print("   pre-order deposit was not taken")
+				failed = true
+			if main.evening_idx == 2 and preorder_forced and not preorder_back_seen:
+				print("   pre-order customer did not come back")
+				failed = true
 			if main.evening_idx == 1 and complaint_forced and (int(main.econ.ledger.get("complaint_n", 0)) < 1 or int(main.econ.ledger.get("complaint", 0)) <= 0):
 				print("   after-hours complaint was not charged")
 				failed = true
@@ -255,6 +263,28 @@ func run() -> void:
 			continue
 		var cname: String = main.current["name"]
 		var before: int = main.customer_idx
+		if main.current.has("preorder"):
+			print("--- ", cname, " came back for the pre-order, place in line ", main.customer_idx)
+			ok = await wrap_gift(true, false)
+			await wait_until(func(): return main.customer_idx > before or main.hud.summary_root.visible or main.hud.final_root.visible, 60.0, "pre-order served")
+			preorder_back_seen = preorder_back_seen or main.evening_idx == 2
+			served += 1
+			continue
+		if main.evening_idx == 1 and not preorder_forced and main.Data.ITEMS[str(main.current["ideal"])]["kind"] == "train":
+			# нужной игрушки нет: все поезда с полки убираем, клиент должен оставить задаток
+			main.stock.units["train"] = []
+			main.stock.units["train_mid"] = []
+			main._sync_shelf()
+			preorder_forced = true
+			var npo: int = main.preorders.size()
+			main._on_offer(main.stock.available_ids()[0])
+			await wait_until(func(): return main.customer_idx > before, 30.0, "pre-order customer leaves")
+			if main.preorders.size() != npo + 1:
+				print("   no pre-order was taken")
+				failed = true
+			print("--- ", cname, " left a pre-order deposit: ", main.preorders)
+			served += 1
+			continue
 		var ideal: String = main.current["ideal"]
 		var guessed := served % 3 != 1
 		print("--- ", cname, " ideal=", ideal, " guess=", guessed)
@@ -277,7 +307,14 @@ func run() -> void:
 			if not main.stock.infinite and not main.stock.available_ids().has(pick):
 				pick = main.stock.available_ids()[0] if main.stock.available_ids().size() > 0 else pick
 		if str(main.current.get("scene", "")) != "santa":
+			var npo2: int = main.preorders.size()
 			main._on_offer(pick)
+			await process_frame
+			if main.preorders.size() > npo2:
+				print("--- ", cname, " left a pre-order deposit too")
+				await wait_until(func(): return main.customer_idx > before, 30.0, "pre-order customer leaves")
+				served += 1
+				continue
 			if main.evening_idx == 1 and not complaint_forced:
 				# проданный брак: после смены клиент вернётся ругаться, деньги уйдут из копилки
 				main.current_bad = "bad"

@@ -15,9 +15,9 @@ dest_files=["res://.godot/imported/ingrid_0.png-df6c14488967c0fdd92a94e38bd88390
 
 [params]
 
-compress/mode=0
+compress/mode=1
 compress/high_quality=false
-compress/lossy_quality=0.7
+compress/lossy_quality=0.85
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1

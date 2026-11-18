@@ -71,6 +71,9 @@ const SHELF_VIEW_SCALE := 1.6
 const BACK_BTN := Rect2(34, 650, 170, 48)
 const CUSTOMER_HAND := Vector2(520, 470)
 const GIFT_POS := Vector2(565, 548)
+const KEEP_POS := Vector2(930, 556)   # подарки, которые подарили нам самим, остаются на прилавке
+const KEEP_STEP := 92.0               # следующий такой подарок встаёт левее
+const KEEP_SCALE := 0.36
 const TABLE_ITEM_SCALE := 1.5   # игрушка на столе крупнее, чем на полке: её нужно нажать
 const MOUTH := Vector2(555, 300)
 
@@ -127,6 +130,7 @@ var gift_clickable := false
 var gift_look: Dictionary = {}
 var gift_poly := PackedVector2Array()
 var gift_t := 0.0
+var keepsakes: Array = []      # {look, poly, t}: подарки нам самим, стоят на прилавке до конца игры
 var input_enabled := true
 
 
@@ -267,6 +271,19 @@ func show_gift(look: Dictionary) -> void:
 
 func clear_gift() -> void:
 	gift_look = {}
+
+
+## Подарок подарили нам: он уезжает со стола на прилавок и остаётся там до конца игры.
+func keep_gift() -> void:
+	if gift_look.is_empty():
+		return
+	keepsakes.append({"look": gift_look, "poly": gift_poly, "t": 0.0})
+	gift_look = {}
+	AudioSynth.play_sfx("pop_in")
+
+
+func clear_keepsakes() -> void:
+	keepsakes.clear()
 
 
 func reset() -> void:
@@ -426,6 +443,8 @@ func _process(delta: float) -> void:
 	time += delta
 	bubble_t = minf(bubble_t + delta / 0.7, 1.0)
 	gift_t = minf(gift_t + delta / 0.6, 1.0)
+	for k in keepsakes:
+		k["t"] = minf(float(k["t"]) + delta / 0.9, 1.0)
 	purr_cd = maxf(purr_cd - delta, 0.0)
 	jar_bump = maxf(jar_bump - delta * 2.5, 0.0)
 	shelf_t = move_toward(shelf_t, 1.0 if shelf_open else 0.0, delta / 0.22)
@@ -480,6 +499,7 @@ func _draw() -> void:
 	_draw_cat()
 	_draw_wall_shelf_hint()
 	_draw_plaques()
+	_draw_keepsakes()
 	_draw_gift()
 	_draw_give()
 	_draw_shelf_view()
@@ -719,17 +739,35 @@ func _draw_gift() -> void:
 		return
 	var e := U.ease_out_back(gift_t)
 	var s := 0.62 * maxf(e, 0.001)
-	draw_set_transform(GIFT_POS + Vector2(0.0, 12.0 * (1.0 - e)), 0.0, Vector2(s, s))
-	var base := Color.html(gift_look["base"])
-	var acc := Color.html(gift_look["accent"])
-	var shape: bool = gift_look["wrap_mode"] == "shape"
-	var item_id: String = gift_look["item_id"]
+	_draw_look(gift_look, gift_poly, GIFT_POS + Vector2(0.0, 12.0 * (1.0 - e)), s)
+
+
+func _draw_keepsakes() -> void:
+	for i in keepsakes.size():
+		var k: Dictionary = keepsakes[i]
+		var t := U.ease_in_out(float(k["t"]))
+		var dst := KEEP_POS - Vector2(KEEP_STEP * float(i), 0.0)
+		var pos := GIFT_POS.lerp(dst, t) + Vector2(0.0, -60.0 * sin(t * PI))
+		var look: Dictionary = k["look"]
+		var poly: PackedVector2Array = k["poly"]
+		var h := float(look["h"]) if look["wrap_mode"] != "shape" else 200.0
+		var s := lerpf(0.62, KEEP_SCALE, t)
+		# низ подарка стоит на прилавке
+		_draw_look(look, poly, pos - Vector2(0.0, h * 0.5 * (s - KEEP_SCALE)), s)
+
+
+func _draw_look(look: Dictionary, poly: PackedVector2Array, pos: Vector2, s: float) -> void:
+	draw_set_transform(pos, 0.0, Vector2(s, s))
+	var base := Color.html(look["base"])
+	var acc := Color.html(look["accent"])
+	var shape: bool = look["wrap_mode"] == "shape"
+	var item_id: String = look["item_id"]
 	var tail_data: Array = []
 	if shape and Data.ITEMS[item_id].has("tail"):
 		tail_data = Data.ITEMS[item_id]["tail"]
-	var ribbon_col := Color.html(gift_look["ribbon"]) if gift_look["ribbon"] != "" else Color(0, 0, 0, 0)
-	var has_ribbon: bool = gift_look["ribbon"] != ""
-	var bow: float = gift_look["bow"]
+	var ribbon_col := Color.html(look["ribbon"]) if look["ribbon"] != "" else Color(0, 0, 0, 0)
+	var has_ribbon: bool = look["ribbon"] != ""
+	var bow: float = look["bow"]
 	# собранный хвост
 	if not tail_data.is_empty():
 		var b := Vector2(float(tail_data[0]), float(tail_data[1]))
@@ -740,18 +778,18 @@ func _draw_gift() -> void:
 			b - d * 10.0 + pp * -13.0, b + d * ln + pp * -36.0, b + d * (ln * 0.88) + pp * -16.0,
 			b + d * (ln * 1.06), b + d * (ln * 0.88) + pp * 16.0, b + d * ln + pp * 36.0, b - d * 10.0 + pp * 13.0])
 		U.fill_stroke(self, fan, base, 5.0, time)
-	U.fill_stroke(self, gift_poly, base, 5.0, time)
+	U.fill_stroke(self, poly, base, 5.0, time)
 	# рисунок бумаги: мелкие акценты
 	var bounds := Rect2(-130, -130, 260, 260)
 	for gx in range(-4, 5):
 		for gy in range(-4, 5):
 			var c := Vector2(float(gx) * 30.0 + float(gy % 2) * 15.0, float(gy) * 30.0)
-			if bounds.has_point(c) and Geometry2D.is_point_in_polygon(c, gift_poly):
+			if bounds.has_point(c) and Geometry2D.is_point_in_polygon(c, poly):
 				draw_circle(c, 4.0, Color(acc.r, acc.g, acc.b, 0.7))
 	if has_ribbon:
 		if tail_data.is_empty():
-			var w: float = gift_look["w"]
-			var h: float = gift_look["h"]
+			var w: float = look["w"]
+			var h: float = look["h"]
 			draw_rect(Rect2(-w * 0.5, -9.0, w, 18.0), ribbon_col)
 			draw_rect(Rect2(-9.0, -h * 0.5, 18.0, h), ribbon_col)
 			U.draw_bow(self, Vector2.ZERO, bow, ribbon_col, time)

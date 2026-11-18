@@ -17,6 +17,12 @@ const Dialogue = preload("res://scripts/dialogue.gd")
 const ReorderScreen = preload("res://scripts/reorder_screen.gd")
 const InspectScreen = preload("res://scripts/inspect_screen.gd")
 
+## Упаковка и оплата: кривее REWRAP_BELOW клиент сразу просит переупаковать; плата = цена × (PAY_BASE + PAY_NEAT × аккуратность).
+const REWRAP_BELOW := 0.5
+const PAY_BASE := 0.7
+const PAY_NEAT := 0.5
+const DEPOSIT_SHARE := 0.3   # задаток за предзаказ: доля цены игрушки
+
 var econ
 var stock
 var dialogue
@@ -33,6 +39,9 @@ var complaints_today := 0   # сколько с нас снимут вечеро
 var complaint_count := 0
 var complaint_list: Array = []   # кому продали брак этой ночью: {who, item, pay, defect}; придут ругаться после смены
 var complaint_mode := false      # идёт сценка жалоб после смены: обычный приход клиента не запускается
+var preorders: Array = []        # {who, kind, item, deposit, night}: клиент вернётся в ночь night за заказанной игрушкой
+var night_queue: Array = []      # клиенты этой ночи: сначала вернувшиеся за предзаказом, потом обычные
+var free_gift := false           # этот клиент попросил подарок бесплатно, и мы согласились
 var tint
 var order_root
 var wrap_root
@@ -159,7 +168,7 @@ func _wait_or_click(seconds: float) -> void:
 func _sync_counter() -> void:
 	var ev: Dictionary = Data.EVENINGS[evening_idx]
 	var date_parts: PackedStringArray = str(ev["date"]).split(" ")
-	var clist: Array = ev["customers"]
+	var clist: Array = night_queue if not night_queue.is_empty() else ev["customers"]
 	order.set_info({
 		"night": evening_idx + 1,
 		"nights": Data.EVENINGS.size(),
@@ -263,6 +272,14 @@ func _begin_evening() -> void:
 	patience_max = float(ev["patience"])
 	customer_idx = 0
 	redo_count = 0
+	night_queue = []
+	for po in preorders:
+		if int(po["night"]) == evening_idx:
+			var back: Dictionary = (po["who"] as Dictionary).duplicate()
+			back["preorder"] = po
+			night_queue.append(back)
+	preorders = preorders.filter(func(po): return int(po["night"]) != evening_idx)
+	night_queue.append_array(ev["customers"])
 	order.reset()
 	order.input_enabled = false
 	status.show_patience(false)
@@ -282,12 +299,13 @@ func _begin_evening() -> void:
 
 func _next_customer() -> void:
 	var ev: Dictionary = Data.EVENINGS[evening_idx]
-	var list: Array = ev["customers"]
+	var list: Array = night_queue
 	if customer_idx >= list.size():
 		_end_evening()
 		return
 	current = list[customer_idx]
 	redo_count = 0
+	free_gift = false
 	var clock: Array = ev["clock"]
 	var frac := float(customer_idx) / float(maxi(list.size() - 1, 1))
 	bg.set_clock(lerpf(float(clock[0]), float(clock[1]), frac))
@@ -313,6 +331,9 @@ func _on_customer_arrived() -> void:
 				return
 	if str(current.get("scene", "")) == "santa":
 		await _santa_scene(e)
+		return
+	if current.has("preorder"):
+		await _preorder_return(e)
 		return
 	# Клиент всегда приходит с пустыми руками: мы читаем его мысли и предлагаем подарок с полки.
 	order.show_thought(current["name"], current["thought"])
@@ -379,8 +400,12 @@ func _on_offer(offered: String) -> void:
 		chosen_item = offered
 	elif stock.infinite:
 		chosen_item = ideal
+	elif not stock.has_kind(ideal_kind):
+		# нужной игрушки нет: клиент оставляет задаток и вернётся за ней следующей ночью
+		await _take_preorder(e, ideal)
+		return
 	else:
-		chosen_item = stock.pick_for_kind(ideal_kind)   # клиент выбирает сам: нужный вид, иначе что осталось
+		chosen_item = stock.pick_for_kind(ideal_kind)   # клиент выбирает сам: нужный вид
 	if not guessed:
 		order.show_bubble(current["name"], str(Data.BUYER_LINES["miss"]))
 		AudioSynth.play_sfx("dull")
@@ -412,6 +437,15 @@ func _on_offer(offered: String) -> void:
 	await get_tree().create_timer(1.6).timeout
 	if e != epoch:
 		return
+	# раз за ночь кто-то просит подарок бесплатно: решаем, дарить или нет
+	if current.has("ask_free"):
+		if not await _ask_free(e):
+			return
+	await _serve_item(e)
+
+
+## Игрушка на столе: клиент говорит, как упаковать, мы нажимаем на подарок и идём упаковывать.
+func _serve_item(e: int) -> void:
 	# после выбора подарка клиент говорит, как его упаковать (то же стоит в талоне на столе)
 	var pack := str(current.get("pack", ""))
 	if pack != "":
@@ -490,22 +524,14 @@ func _on_gift_ready(res: Dictionary) -> void:
 	var item_id: String = res["look"]["item_id"]
 	var neat: float = res["neat"]
 
-	# чем кривее подарок, тем выше шанс, что клиент расстроится
+	# кривой подарок клиент сразу просит переупаковать (кроме Санты и тех, кто дарит подарок нам)
 	var outcome := "pay"
-	if neat < 0.7 and str(current.get("scene", "")) == "":
-		var roll := randf()
-		var can_redo := redo_count < 1
-		if neat >= 0.4:
-			if roll < 0.35 and can_redo:
-				outcome = "redo"
-		elif roll < 0.35 and can_redo:
-			outcome = "redo"
-		elif roll < 0.70:
-			outcome = "refuse"
+	if neat < REWRAP_BELOW and str(current.get("scene", "")) == "" and not current.get("free", false):
+		outcome = "redo"
 	if outcome == "redo":
 		redo_count += 1
 		customer.set_mood(0)
-		order.show_bubble(current["name"], "That came out crooked. Please do it again.")
+		order.show_bubble(current["name"], "That came out crooked (%d%%). Please wrap it again." % roundi(neat * 100.0))
 		await get_tree().create_timer(2.4).timeout
 		if e != epoch:
 			return
@@ -532,12 +558,20 @@ func _on_gift_ready(res: Dictionary) -> void:
 		return
 
 	var it: Dictionary = Data.ITEMS[item_id]
-	var pay: int = int(it.get("sell", it["price"]))
-	econ.earn(pay)
-	status.set_money(econ.balance)
-	order.pay_pop(pay)
+	# чем аккуратнее упаковка, тем больше платят; за предзаказ задаток уже у нас
+	var pay: int = roundi(float(it.get("sell", it["price"])) * (PAY_BASE + PAY_NEAT * clampf(neat, 0.0, 1.0)))
+	if current.has("preorder"):
+		pay = maxi(pay - int(current["preorder"]["deposit"]), 0)
+	if free_gift:
+		pay = 0
+	if pay > 0:
+		econ.earn(pay)
+		status.set_money(econ.balance)
+		order.pay_pop(pay)
+	if not free_gift and str(current.get("scene", "")) == "":
+		hud.show_toast("Wrap quality %d%%: paid %d" % [roundi(neat * 100.0), pay])
 	# проданный брак: клиент придёт жаловаться уже после смены, вечером с нас снимут эти деньги
-	if current_bad != "":
+	if current_bad != "" and pay > 0:
 		complaints_today += pay
 		complaint_count += 1
 		complaint_list.append({"who": current, "item": item_id, "pay": pay, "defect": current_bad})
@@ -577,6 +611,10 @@ func _on_gift_ready(res: Dictionary) -> void:
 	if tips == 0:
 		line = current["meh"]
 		mood = mini(mood, 1)
+	if free_gift:
+		tips = 0
+		mood = 2
+		line = str(Story.FREE_THANKS[randi() % Story.FREE_THANKS.size()])
 	customer.set_mood(mood)
 	if str(current.get("scene", "")) == "santa":
 		if not auto_play:
@@ -593,8 +631,126 @@ func _on_gift_ready(res: Dictionary) -> void:
 	await get_tree().create_timer(2.9).timeout
 	if e != epoch:
 		return
-	order.clear_gift()
+	if current.get("free", false):
+		order.keep_gift()   # этот подарок подарили нам: он остаётся на прилавке
+	else:
+		order.clear_gift()
 	await _customer_leaves(e)
+
+
+## Нужной игрушки нет на полке: клиент оставляет задаток и вернётся за ней в следующую ночь.
+## В последнюю ночь возвращаться некогда: клиент уходит ни с чем.
+func _take_preorder(e: int, ideal: String) -> void:
+	var toy := str(Data.ITEMS[ideal]["name"]).to_lower()
+	var kind := str(Data.ITEMS[ideal]["kind"])
+	status.show_patience(false)
+	patience_on = false
+	patience_paused = false
+	if evening_idx >= Data.EVENINGS.size() - 1:
+		customer.set_mood(0)
+		order.show_bubble(current["name"], "No %s on your shelf? Oh... then nothing tonight." % toy)
+		await get_tree().create_timer(0.3 if auto_play else 2.8).timeout
+		if e != epoch:
+			return
+		await _customer_leaves(e)
+		return
+	var deposit := maxi(roundi(float(Data.ITEMS[ideal].get("sell", Data.ITEMS[ideal]["price"])) * DEPOSIT_SHARE), 1)
+	customer.set_mood(1)
+	order.show_bubble(current["name"], "No %s on your shelf? Could you order one for me? Here is a deposit of %d. I will come back tomorrow night." % [toy, deposit])
+	econ.earn_deposit(deposit)
+	status.set_money(econ.balance)
+	order.pay_pop(deposit)
+	preorders.append({"who": current, "kind": kind, "item": ideal, "deposit": deposit, "night": evening_idx + 1})
+	hud.show_toast("Pre-order: %s, %s tomorrow night. Order it from a supplier that delivers in 1 night." % [str(current["name"]), toy])
+	await get_tree().create_timer(0.3 if auto_play else 4.2).timeout
+	if e != epoch:
+		return
+	await _customer_leaves(e)
+
+
+## Клиент вернулся за предзаказом: игрушка есть — упаковываем как обычно (платит остаток);
+## нет — возвращаем задаток, и он злится.
+func _preorder_return(e: int) -> void:
+	var po: Dictionary = current["preorder"]
+	var toy := str(Data.ITEMS[str(po["item"])]["name"]).to_lower()
+	var deposit := int(po["deposit"])
+	order.show_bubble(current["name"], "I'm back for the %s I ordered last night!" % toy)
+	await get_tree().create_timer(0.3 if auto_play else 2.4).timeout
+	if e != epoch:
+		return
+	var item: String = stock.pick_for_kind(str(po["kind"])) if stock.has_kind(str(po["kind"])) else ""
+	if item == "":
+		customer.face_override = customer.ANGRY_FACE
+		order.show_bubble(current["name"], "You still don't have it? Then give me back my deposit!")
+		await get_tree().create_timer(0.3 if auto_play else 2.4).timeout
+		if e != epoch:
+			return
+		econ.spend("deposit_back", deposit)
+		status.set_money(econ.balance)
+		order.refund_pop(deposit)
+		await get_tree().create_timer(0.3 if auto_play else 1.6).timeout
+		if e != epoch:
+			return
+		customer.face_override = -1
+		await _customer_leaves(e)
+		return
+	current_match = "perfect"
+	read_in_time = false
+	offer_made = true
+	chosen_item = item
+	_start_service_timer()
+	patience_paused = true
+	current_bad = stock.take(chosen_item)
+	_sync_shelf()
+	order.give_item(chosen_item)
+	customer.set_mood(2)
+	order.show_bubble(current["name"], "That's the one! Thank you for ordering it.")
+	await order.item_given
+	if e != epoch:
+		return
+	await get_tree().create_timer(0.2 if auto_play else 1.4).timeout
+	if e != epoch:
+		return
+	await _serve_item(e)
+
+
+## Клиент просит подарок бесплатно. Дарим: упаковываем как обычно, денег и чаевых нет.
+## Отказываем: игрушка возвращается на полку, клиент грустно уходит. Возвращает true, если дарим.
+func _ask_free(e: int) -> bool:
+	order.show_bubble(current["name"], str(current["ask_free"]))
+	var gift := true
+	if auto_play:
+		await get_tree().create_timer(0.2).timeout
+	else:
+		var secs: float = AudioSynth.babble_seconds(str(current["ask_free"]).length())
+		AudioSynth.babble(str(Story.VOICES.get(str(current["name"]), "woman")), secs)
+		await get_tree().create_timer(secs + 0.6).timeout
+		AudioSynth.stop_babble()
+		if e != epoch:
+			return false
+		order.hide_bubble()
+		var pick: int = await dialogue.play([{"who": str(current["name"]), "text": str(current["ask_free"]), "choices": Story.FREE_CHOICES}])
+		gift = pick == 0
+	if e != epoch:
+		return false
+	if gift:
+		free_gift = true
+		customer.set_mood(2)
+		return true
+	customer.set_mood(0)
+	order.take_item()
+	stock.put_back(chosen_item, current_bad)
+	current_bad = ""
+	_sync_shelf()
+	status.show_patience(false)
+	patience_on = false
+	patience_paused = false
+	order.show_bubble(current["name"], str(Story.FREE_DECLINED[randi() % Story.FREE_DECLINED.size()]))
+	await get_tree().create_timer(0.3 if auto_play else 2.6).timeout
+	if e != epoch:
+		return false
+	await _customer_leaves(e)
+	return false
 
 
 ## Оценка подарка (значения 0..1): просьбы клиента, аккуратность и дорогие материалы.
@@ -753,11 +909,15 @@ func _order_toys() -> void:
 	var e := epoch
 	if auto_play:
 		# автотест: берём у обоих поставщиков по несколько игрушек
-		stock.place_order("jolly", {"bear": 1, "ball": 2, "train": 1}, evening_idx)
+		var lines := {"bear": 1, "ball": 2, "train": 1}
+		for po in preorders:   # под предзаказы берём с запасом: у Jolly бывает брак
+			lines[str(po["item"])] = int(lines.get(str(po["item"]), 0)) + 2
+		stock.place_order("jolly", lines, evening_idx)
 		if evening_idx == 0:
 			stock.place_order("frost", {"ornament": 2, "bear": 2, "ball_mid": 1}, evening_idx)
 		return
-	reorder.open(stock, evening_idx, Data.EVENINGS.size() - 1, econ.balance, evening_idx == 0)
+	var due_next := preorders.filter(func(po): return int(po["night"]) == evening_idx + 1)
+	reorder.open(stock, evening_idx, Data.EVENINGS.size() - 1, econ.balance, evening_idx == 0, due_next)
 	var spent: int = await reorder.finished
 	if e != epoch:
 		return
@@ -868,6 +1028,10 @@ func _final() -> void:
 
 func _restart() -> void:
 	epoch += 1
+	preorders = []
+	night_queue = []
+	free_gift = false
+	order.clear_keepsakes()
 	thinking = false
 	offer_made = false
 	complaints_today = 0

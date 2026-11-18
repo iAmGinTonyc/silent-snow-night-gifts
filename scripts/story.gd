@@ -76,6 +76,11 @@ const COMPLAINT_SUB := [
 ]
 const COMPLAINT_BYE := ["Hmph. Check your toys next time.", "And happy holidays to you too.", "I will be watching this shop."]
 
+## Раз за ночь кто-то просит подарок бесплатно (строка "ask_free" у клиента в data.gd). Ответы эльфа и реакции.
+const FREE_CHOICES := ["Take it. Merry Christmas!", "Sorry, I can't give it away."]
+const FREE_THANKS := ["Thank you! I will never forget this.", "You are a real Christmas elf. Thank you!", "Bless you, dear. Merry Christmas!"]
+const FREE_DECLINED := ["I understand. Merry Christmas anyway...", "Of course. Sorry for asking.", "It's all right. Have a good night."]
+
 ## Конец демки.
 const DEMO_END_TITLE := "To be continued..."
 const DEMO_END_TEXT := "The rest of the story is still being wrapped."

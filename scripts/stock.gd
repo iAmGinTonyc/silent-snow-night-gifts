@@ -112,6 +112,25 @@ func pick_for_kind(kind: String) -> String:
 	return rest[rng.randi_range(0, rest.size() - 1)]
 
 
+## Есть ли на полке хоть одна игрушка этого вида (любого уровня).
+func has_kind(kind: String) -> bool:
+	if infinite:
+		return true
+	for id in available_ids():
+		if Data.ITEMS[id]["kind"] == kind:
+			return true
+	return false
+
+
+## Вернуть штуку на полку (клиенту отказали): тот же скрытый брак, что был.
+func put_back(item_id: String, defect: String) -> void:
+	if infinite or item_id == "":
+		return
+	if not units.has(item_id):
+		units[item_id] = []
+	(units[item_id] as Array).append({"defect": defect})
+
+
 ## Забрать одну штуку с полки. Возвращает её скрытый брак: "" целая, "bad" явный, "sub" почти незаметный.
 func take(item_id: String) -> String:
 	if infinite:
