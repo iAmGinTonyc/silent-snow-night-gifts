@@ -2,7 +2,13 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+		<meta name="theme-color" content="#0e1432">
+		<meta name="mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+		<meta name="apple-mobile-web-app-title" content="Snow Night Gifts">
+		<link rel="manifest" href="manifest.webmanifest">
 		<title>$GODOT_PROJECT_NAME</title>
 		<style>
 html, body, #canvas {
@@ -11,11 +17,24 @@ html, body, #canvas {
 	border: 0;
 }
 
+html, body {
+	width: 100%;
+	height: 100%;
+}
+
 body {
+	position: fixed;
+	inset: 0;
 	color: white;
 	background-color: #0e1432;
 	overflow: hidden;
 	touch-action: none;
+	overscroll-behavior: none;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+	-webkit-text-size-adjust: 100%;
 }
 
 #canvas {
@@ -182,8 +201,92 @@ body {
 	letter-spacing: 0.02em;
 }
 
+/* Низкий экран (телефон лёжа): загрузчик поменьше, чтобы всё влезло по высоте. */
+@media (max-height: 520px) {
+	#loader { gap: 10px; }
+	#loader-sprite { width: min(52vh, 400px); }
+	#loader-title { font-size: clamp(18px, 6vh, 30px); }
+}
+
+/* Телефон или планшет стоит вертикально: игра на паузе, просим повернуть экран. */
+#rotate {
+	position: fixed;
+	inset: 0;
+	z-index: 20;
+	display: none;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	gap: 18px;
+	padding: 24px;
+	box-sizing: border-box;
+	text-align: center;
+	background: radial-gradient(ellipse at 50% 40%, #1b2a56 0%, #0e1432 70%);
+	font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+}
+
+body.portrait #rotate {
+	display: flex;
+}
+
+.rotate-phone {
+	width: 64px;
+	height: 108px;
+	border: 6px solid #f7e6b5;
+	border-radius: 14px;
+	box-sizing: border-box;
+	position: relative;
+	animation: turn 2.4s ease-in-out infinite;
+	box-shadow: 0 0 22px rgba(247, 214, 120, 0.25);
+}
+
+.rotate-phone::after {
+	content: '';
+	position: absolute;
+	left: 50%;
+	bottom: 6px;
+	width: 14px;
+	height: 4px;
+	margin-left: -7px;
+	border-radius: 2px;
+	background: #f7e6b5;
+}
+
+@keyframes turn {
+	0%, 25% { transform: rotate(0deg); }
+	55%, 85% { transform: rotate(-90deg); }
+	100% { transform: rotate(0deg); }
+}
+
+.rotate-title {
+	margin: 0;
+	font-size: 26px;
+	font-weight: bold;
+	color: #f7e6b5;
+	text-shadow: 0 3px 0 #2a1a14;
+}
+
+.rotate-text {
+	margin: 0;
+	max-width: 320px;
+	font-size: 17px;
+	line-height: 1.35;
+	color: #d9cdb2;
+}
+
+#rotate-full {
+	margin-top: 6px;
+	padding: 12px 22px;
+	border: 4px solid #2a1a14;
+	border-radius: 14px;
+	background: #e04a4a;
+	color: #fff4dc;
+	font: bold 18px 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.snow { animation: none; }
+	.rotate-phone { animation: none; transform: rotate(-90deg); }
 }
 		</style>
 		$GODOT_HEAD_INCLUDE
@@ -206,6 +309,13 @@ body {
 			<p id="loader-text">Warming up the shop...</p>
 		</div>
 
+		<div id="rotate" role="alert" aria-live="assertive">
+			<div class="rotate-phone" aria-hidden="true"></div>
+			<p class="rotate-title">Turn your device sideways</p>
+			<p class="rotate-text">The shop only fits in landscape. The night waits for you: the game is paused.</p>
+			<button id="rotate-full" type="button" hidden>Play in full screen</button>
+		</div>
+
 		<div id="status">
 			<progress id="status-progress"></progress>
 			<div id="status-notice"></div>
@@ -225,6 +335,66 @@ const engine = new Engine(GODOT_CONFIG);
 	const bar = document.getElementById('loader-bar');
 	const fill = document.getElementById('loader-fill');
 	const text = document.getElementById('loader-text');
+
+	// --- Телефон и планшет: только горизонтально ---
+	// Вертикально: показываем просьбу повернуть экран и ставим window.__ssngPortrait (игра встаёт на паузу,
+	// см. scripts/mobile.gd). Первое касание включает полный экран и, где можно (Android), фиксирует горизонталь.
+	const touchMq = window.matchMedia('(hover: none) and (pointer: coarse)');
+	const rotateFull = document.getElementById('rotate-full');
+	const canFullscreen = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+	function isTouchDevice() {
+		return touchMq.matches || navigator.maxTouchPoints > 1;
+	}
+	function updateOrientation() {
+		const portrait = isTouchDevice() && window.innerHeight > window.innerWidth;
+		window.__ssngPortrait = portrait;
+		document.body.classList.toggle('portrait', portrait);
+	}
+	function goFullscreenLandscape() {
+		const el = document.documentElement;
+		const inFull = document.fullscreenElement || document.webkitFullscreenElement;
+		let p = Promise.resolve();
+		if (!inFull && canFullscreen) {
+			try {
+				p = Promise.resolve(el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' }) : el.webkitRequestFullscreen());
+			} catch (e) {
+				p = Promise.resolve();
+			}
+		}
+		p.then(function () {
+			if (screen.orientation && screen.orientation.lock) {
+				return screen.orientation.lock('landscape');
+			}
+			return null;
+		}).catch(function () {}).then(function () {
+			setTimeout(updateOrientation, 300);
+		});
+	}
+	if (canFullscreen) {
+		rotateFull.hidden = false;
+		rotateFull.addEventListener('click', goFullscreenLandscape);
+	}
+	let askedFull = false;
+	window.addEventListener('pointerup', function (ev) {
+		if (askedFull || ev.pointerType !== 'touch' || !canFullscreen) {
+			return;
+		}
+		askedFull = true;
+		goFullscreenLandscape();
+	}, true);
+	window.addEventListener('resize', updateOrientation);
+	window.addEventListener('orientationchange', function () {
+		setTimeout(updateOrientation, 200);
+	});
+	document.addEventListener('contextmenu', function (ev) {
+		if (isTouchDevice()) {
+			ev.preventDefault();
+		}
+	});
+	document.addEventListener('gesturestart', function (ev) {
+		ev.preventDefault();
+	});
+	updateOrientation();
 
 	// --- Загрузочный экран ---
 	const COLS = 6;

@@ -31,6 +31,8 @@ var read_in_time := false   # подарок предложен до конца 
 var offer_made := false
 var complaints_today := 0   # сколько с нас снимут вечером за проданный брак
 var complaint_count := 0
+var complaint_list: Array = []   # кому продали брак этой ночью: {who, item, pay, defect}; придут ругаться после смены
+var complaint_mode := false      # идёт сценка жалоб после смены: обычный приход клиента не запускается
 var tint
 var order_root
 var wrap_root
@@ -209,9 +211,17 @@ func _show_screen(which: String) -> void:
 	screen = which
 	status.visible = (which == "wrap")   # на экране заказа деньги и терпение показывают вывески сверху
 	# подсказка: на экране заказа слева сверху (внизу плашки прилавка), на столе внизу
+	# на телефоне подсказка крупнее и в две строки: экран там примерно вдвое меньше
+	var touch := DisplayServer.is_touchscreen_available()
+	hud.hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if touch else TextServer.AUTOWRAP_OFF
+	hud.hint_label.add_theme_font_size_override("font_size", 23 if touch else 17)
+	hud.hint_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM if (touch and which != "order") else VERTICAL_ALIGNMENT_TOP
 	if which == "order":
 		hud.hint_label.position = Vector2(30, 90)
-		hud.hint_label.size = Vector2(560, 26)
+		hud.hint_label.size = Vector2(600, 64) if touch else Vector2(560, 26)
+	elif touch:
+		hud.hint_label.position = Vector2(150, 646)
+		hud.hint_label.size = Vector2(980, 70)
 	else:
 		hud.hint_label.position = Vector2(262, 684)
 		hud.hint_label.size = Vector2(760, 26)
@@ -287,6 +297,8 @@ func _next_customer() -> void:
 
 
 func _on_customer_arrived() -> void:
+	if complaint_mode:
+		return
 	var e := epoch
 	current_match = ""
 	chosen_item = ""
@@ -528,6 +540,7 @@ func _on_gift_ready(res: Dictionary) -> void:
 	if current_bad != "":
 		complaints_today += pay
 		complaint_count += 1
+		complaint_list.append({"who": current, "item": item_id, "pay": pay, "defect": current_bad})
 
 	var s := _evaluate(current, res)
 	if neat < 0.4:
@@ -646,16 +659,80 @@ func _evaluate(c: Dictionary, r: Dictionary) -> float:
 # --- Конец вечера, лавка, финал --------------------------------------------------
 
 func _end_evening() -> void:
+	var e := epoch
 	order.input_enabled = false
 	thinking = false
+	if not complaint_list.is_empty():
+		await _complaint_scene(e)
+		if e != epoch:
+			return
 	if complaints_today > 0:
 		econ.spend("complaint", complaints_today)
+	if complaint_count > 0:
 		econ.ledger["complaint_n"] = complaint_count
-		complaints_today = 0
-		complaint_count = 0
+	complaints_today = 0
+	complaint_count = 0
 	var summary: Dictionary = econ.close_evening()
 	status.set_money(econ.balance)
 	hud.show_summary(summary, econ.balance, evening_idx + 1, Data.EVENINGS.size())
+
+
+## После смены: каждый, кому мы продали брак, возвращается и ругается, а его деньги улетают из копилки обратно.
+func _complaint_scene(e: int) -> void:
+	complaint_mode = true
+	var fast := auto_play
+	status.show_patience(false)
+	hud.set_hint("")
+	order.hide_bubble()
+	customer.reset()
+	hud.show_title(Story.AFTER_HOURS_TITLE, Story.AFTER_HOURS_SUB)
+	await get_tree().create_timer(0.3 if fast else 2.4).timeout
+	var list := complaint_list.duplicate()
+	complaint_list.clear()
+	for c in list:
+		if e != epoch:
+			complaint_mode = false
+			return
+		var who: Dictionary = c["who"]
+		var pay := int(c["pay"])
+		current = who
+		AudioSynth.play_sfx("door")
+		customer.arrive(who)
+		await customer.arrived
+		if e != epoch:
+			complaint_mode = false
+			return
+		customer.face_override = 0   # отдельного «злого» кадра нет, берём самое расстроенное лицо
+		var toy := str(Data.ITEMS[str(c["item"])]["name"]).to_lower()
+		var pool: Array = Story.COMPLAINT_BAD if str(c["defect"]) == "bad" else Story.COMPLAINT_SUB
+		var line := str(pool[randi() % pool.size()]).replace("{toy}", toy).replace("{pay}", str(pay))
+		order.show_bubble(str(who["name"]), line)
+		if fast:
+			await get_tree().create_timer(0.3).timeout
+		else:
+			var secs: float = AudioSynth.babble_seconds(line.length())
+			AudioSynth.babble(str(Story.VOICES.get(str(who["name"]), "woman")), secs)
+			await _wait_or_click(secs + 0.8)
+			AudioSynth.stop_babble()
+		if e != epoch:
+			complaint_mode = false
+			return
+		# возвращаем деньги: монеты летят из копилки к клиенту, над копилкой «-N»
+		econ.spend("complaint", pay)
+		complaints_today = maxi(complaints_today - pay, 0)
+		status.set_money(econ.balance)
+		order.refund_pop(pay)
+		order.show_bubble(str(who["name"]), str(Story.COMPLAINT_BYE[randi() % Story.COMPLAINT_BYE.size()]))
+		await get_tree().create_timer(0.4 if fast else 2.0).timeout
+		if e != epoch:
+			complaint_mode = false
+			return
+		order.hide_bubble()
+		customer.face_override = -1
+		customer.leave()
+		await customer.left
+		await get_tree().create_timer(0.2 if fast else 0.5).timeout
+	complaint_mode = false
 
 
 ## «Next» в итогах вечера: после ночи 1 на полке остаётся по 2 штуки, потом заказ игрушек и следующая ночь.
@@ -795,6 +872,8 @@ func _restart() -> void:
 	offer_made = false
 	complaints_today = 0
 	complaint_count = 0
+	complaint_list.clear()
+	complaint_mode = false
 	AudioSynth.stop_babble()
 	patience_on = false
 	evening_idx = 0

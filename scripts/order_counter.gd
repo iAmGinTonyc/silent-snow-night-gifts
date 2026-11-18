@@ -213,6 +213,17 @@ func pay_pop(amount: int) -> void:
 	AudioSynth.play_sfx("coin", 0.0, 0.9)
 
 
+## Возврат денег недовольному клиенту: монетки вылетают из копилки к клиенту, над копилкой «-N».
+func refund_pop(amount: int) -> void:
+	var n := clampi(ceili(float(amount) / 9.0), 1, 7)
+	for i in n:
+		fly_coins.append({"t": -0.13 * float(i), "from": JAR_SLOT, "to": CUSTOMER_HAND + Vector2(24, -14),
+			"kind": "refund", "carry": 0.0, "float": 0})
+	pay_floats.append({"t": 0.0, "text": "-%d" % amount, "tip": false, "neg": true})
+	jar_bump = 1.0
+	AudioSynth.play_sfx("coin", 0.0, 0.8)
+
+
 ## Выбранный подарок едет на прилавок.
 func give_item(item_id: String) -> void:
 	table_item = item_id
@@ -429,7 +440,11 @@ func _process(delta: float) -> void:
 		if fly_coins[i]["t"] >= 1.0:
 			var fc: Dictionary = fly_coins[i]
 			fly_coins.remove_at(i)
-			if str(fc.get("kind", "tip")) == "pay":
+			var fkind := str(fc.get("kind", "tip"))
+			if fkind == "refund":
+				AudioSynth.play_sfx("coin", 0.0, randf_range(0.8, 0.9))
+				continue
+			if fkind == "pay":
 				pending_money = maxf(pending_money - float(fc["carry"]), 0.0)
 			else:
 				tips_shown += 1
@@ -599,7 +614,11 @@ func _draw_coins_and_hearts() -> void:
 		var base := JAR_SLOT + Vector2(0.0, -34.0 - 92.0 * rise)
 		var big := 44 if not bool(pf["tip"]) else 30
 		var col := Color(1.0, 0.92, 0.45, alpha) if not bool(pf["tip"]) else Color(1.0, 0.86, 0.6, alpha)
-		draw_circle(base + Vector2(0.0, -big * 0.3), float(big) * 1.1, Color(1.0, 0.88, 0.35, 0.16 * alpha))   # мягкое свечение
+		var glow := Color(1.0, 0.88, 0.35, 0.16 * alpha)
+		if bool(pf.get("neg", false)):
+			col = Color(1.0, 0.45, 0.38, alpha)   # возврат денег: красный «-N»
+			glow = Color(1.0, 0.3, 0.25, 0.14 * alpha)
+		draw_circle(base + Vector2(0.0, -big * 0.3), float(big) * 1.1, glow)   # мягкое свечение
 		draw_string_outline(font, base + Vector2(-110.0, 0.0), str(pf["text"]), HORIZONTAL_ALIGNMENT_CENTER, 220.0, big, 9, Color(0.32, 0.18, 0.05, 0.85 * alpha))
 		draw_string(font, base + Vector2(-110.0, 0.0), str(pf["text"]), HORIZONTAL_ALIGNMENT_CENTER, 220.0, big, col)
 	for h in hearts:
@@ -692,7 +711,7 @@ func _draw_give() -> void:
 	draw_colored_polygon(U.ellipse(GIFT_POS + Vector2(0.0, sz.y * 0.5), sz.x * 0.42, 7.0), Color(0, 0, 0, 0.22 * a))
 	draw_texture_rect(T_ITEMS[table_item], Rect2(GIFT_POS - sz * 0.5, sz), false, Color(1, 1, 1, a))
 	if gift_clickable:
-		_txt(GIFT_POS + Vector2(-110.0, -sz.y * 0.5 - 16.0), "Click to wrap", 22, Color(1, 0.96, 0.85), true, HORIZONTAL_ALIGNMENT_CENTER, 220.0)
+		_txt(GIFT_POS + Vector2(-110.0, -sz.y * 0.5 - 16.0), U.touch_text("Click to wrap"), 22, Color(1, 0.96, 0.85), true, HORIZONTAL_ALIGNMENT_CENTER, 220.0)
 
 
 func _draw_gift() -> void:
@@ -848,4 +867,4 @@ func _draw_shelf_view() -> void:
 	var br := BACK_BTN
 	draw_rect(Rect2(br.position + Vector2(3, 4), br.size), Color(0, 0, 0, 0.3))
 	U.fill_stroke(self, U.rect_pts(br), Color("#f0c05a") if back_hover else Color("#d9cdb2"), 3.5, time)
-	_txt(Vector2(br.position.x, br.position.y + 32.0), "< Back (Esc)", 20, U.INK, false, HORIZONTAL_ALIGNMENT_CENTER, br.size.x)
+	_txt(Vector2(br.position.x, br.position.y + 32.0), U.touch_text("< Back (Esc)"), 20, U.INK, false, HORIZONTAL_ALIGNMENT_CENTER, br.size.x)

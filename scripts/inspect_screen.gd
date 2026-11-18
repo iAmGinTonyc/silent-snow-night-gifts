@@ -5,6 +5,7 @@ extends CanvasLayer
 ##   inspect.open(stock, order, units, tutorial); var res: Dictionary = await inspect.finished
 
 const UI = preload("res://scripts/ui_kit.gd")
+const U = preload("res://scripts/util.gd")
 const Data = preload("res://scripts/data.gd")
 const Stock = preload("res://scripts/stock.gd")
 
@@ -77,7 +78,7 @@ func _build(tutorial: bool) -> void:
 	var tip := "Look closely. Click a broken toy to send it back. A good toy can't be returned, so be sure."
 	if tutorial:
 		tip = "Our first delivery! Suppliers sometimes pack in a hurry. Look closely and click every broken toy to send it back. A good toy can't be returned."
-	var t := UI.label(tip, 21, Color(0.92, 0.84, 0.7), Vector2(90, 88), Vector2(1100, 56), HORIZONTAL_ALIGNMENT_LEFT)
+	var t := UI.label(U.touch_text(tip), 21, Color(0.92, 0.84, 0.7), Vector2(90, 88), Vector2(1100, 56), HORIZONTAL_ALIGNMENT_LEFT)
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	root.add_child(t)
 	var n := units_in.size()

@@ -60,6 +60,22 @@ const SANTA_BYE := [
 	{"who": "Santa", "face": 2, "text": "I'll be back before New Year. Keep the cat warm!"},
 ]
 
+## После смены: клиент, которому продали брак, возвращается ругаться. {toy} заменяется названием игрушки,
+## {pay} суммой, которую вернём. Явный брак (bad) и почти незаметный (sub) ругают по-разному.
+const AFTER_HOURS_TITLE := "After hours"
+const AFTER_HOURS_SUB := "Someone is knocking. They do not look happy."
+const COMPLAINT_BAD := [
+	"You sold me a broken {toy}! It fell apart the moment I took off the paper. I want my {pay} coins back!",
+	"Look at this {toy}! Broken! On Christmas! I trusted your little shop. {pay} coins, please. Now.",
+	"I came all the way back after you closed. This {toy} is broken. Give me my {pay} coins.",
+]
+const COMPLAINT_SUB := [
+	"Did you even look at this {toy}? There is a crack, right here. I only noticed at home. {pay} coins back, please.",
+	"This {toy} looked fine in the shop, but it is cracked. Very disappointing. I want my {pay} coins back.",
+	"My grandchild found a crack in the {toy} before I did. Embarrassing! Give me back my {pay} coins.",
+]
+const COMPLAINT_BYE := ["Hmph. Check your toys next time.", "And happy holidays to you too.", "I will be watching this shop."]
+
 ## Конец демки.
 const DEMO_END_TITLE := "To be continued..."
 const DEMO_END_TEXT := "The rest of the story is still being wrapped."

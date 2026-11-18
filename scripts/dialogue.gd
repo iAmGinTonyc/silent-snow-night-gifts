@@ -6,6 +6,7 @@ extends CanvasLayer
 ## После выбора ответа он показывается отдельной строкой от имени героя.
 
 const UI = preload("res://scripts/ui_kit.gd")
+const U = preload("res://scripts/util.gd")
 
 const CHARS_PER_SEC := 48.0
 const WHO_COLORS := {
@@ -51,7 +52,7 @@ func _ready() -> void:
 	text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	text_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	root.add_child(text_label)
-	more_label = UI.label("click", 18, Color(1.0, 0.85, 0.5, 0.9), Vector2(1020, 660), Vector2(130, 24), HORIZONTAL_ALIGNMENT_RIGHT)
+	more_label = UI.label(U.touch_text("click"), 18, Color(1.0, 0.85, 0.5, 0.9), Vector2(1020, 660), Vector2(130, 24), HORIZONTAL_ALIGNMENT_RIGHT)
 	root.add_child(more_label)
 	choice_box = Control.new()
 	choice_box.size = Vector2(1280, 720)

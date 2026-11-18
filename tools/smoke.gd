@@ -114,7 +114,10 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 		if w.fold.fold_count() != 1:
 			print("   diagonal corner fold was not applied, folds=", w.fold.fold_count())
 			failed = true
-		w.fold_undo()
+		if w._hit_test(w.UNDO_RECT.get_center()) != "undo":
+			print("   undo button is not hit while a fold can be undone")
+			failed = true
+		w.undo_action()
 		await wait_idle(w)
 		if w.fold.fold_count() != 0 or w.crumples != 1:
 			print("   undo failed, folds=", w.fold.fold_count(), " crumples=", w.crumples)
@@ -165,6 +168,12 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 			w._select_ribbon_tool(0)
 			# лента кладётся двумя щелчками: край подарка, потом противоположный край
 			w._ribbon_press(w.CENTER + Vector2(-w.item_w * 0.5 - 2.0, 4.0))
+			if w.ribbon_anchored:
+				w.undo_action()   # кнопка отката снимает закреплённую ленту, как правая кнопка
+				if w.ribbon_anchored:
+					print("   undo button did not release the ribbon")
+					failed = true
+				w._ribbon_press(w.CENTER + Vector2(-w.item_w * 0.5 - 2.0, 4.0))
 			if not w.ribbon_anchored:
 				var reg: PackedVector2Array = w._stroke_region()
 				var bb := Rect2(reg[0], Vector2.ZERO)
@@ -185,6 +194,9 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 	return true
 
 
+var complaint_forced := false
+
+
 func run() -> void:
 	await process_frame
 	Engine.time_scale = 3.0
@@ -202,6 +214,9 @@ func run() -> void:
 			break
 		if main.hud.summary_root.visible:
 			print("EVENING END. balance=", main.econ.balance, " ledger=", main.econ.ledger)
+			if main.evening_idx == 1 and complaint_forced and (int(main.econ.ledger.get("complaint_n", 0)) < 1 or int(main.econ.ledger.get("complaint", 0)) <= 0):
+				print("   after-hours complaint was not charged")
+				failed = true
 			main.hud.summary_root.visible = false
 			main._on_shop_open()
 			var items: Array = main.shop_list
@@ -236,6 +251,10 @@ func run() -> void:
 				pick = main.stock.available_ids()[0] if main.stock.available_ids().size() > 0 else pick
 		if str(main.current.get("scene", "")) != "santa":
 			main._on_offer(pick)
+			if main.evening_idx == 1 and not complaint_forced:
+				# проданный брак: после смены клиент вернётся ругаться, деньги уйдут из копилки
+				main.current_bad = "bad"
+				complaint_forced = true
 		var perfect := crooked_done or served != 2
 		crooked_done = crooked_done or not perfect
 		var attempts := 0

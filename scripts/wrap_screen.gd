@@ -70,7 +70,8 @@ const SCISSORS_POS := Vector2(COL_L, 502)
 const RULER_POS := Vector2(COL_R, 506)
 const BELL_POS := Vector2(1147, 578)
 const BELL_R := 31.0
-const AXIS_POS := Vector2(333, 192)   # левый верхний угол кнопки Horizontal (внутри контура мата)
+const AXIS_POS := Vector2(333, 192)
+const UNDO_RECT := Rect2(330, 538, 132, 64)   # кнопка отката в левом нижнем углу мата (на сенсорном экране нет правой кнопки)   # левый верхний угол кнопки Horizontal (внутри контура мата)
 const PX_PER_CM := 6.0      # масштаб линейки: 1 см = 6 px
 const CARD_SIZE := Vector2(200, 240)
 
@@ -334,7 +335,7 @@ func _pull_max() -> float:
 
 
 func _hint(text: String) -> void:
-	hint_changed.emit(text)
+	hint_changed.emit(U.touch_text(text))
 
 
 func _paper_cost(length: float) -> int:
@@ -436,6 +437,8 @@ func _card_rect(i: int) -> Rect2:
 
 
 func _hit_test(pos: Vector2) -> String:
+	if _undo_visible() and UNDO_RECT.has_point(pos):
+		return "undo"
 	if pos.distance_to(BELL_POS) < BELL_R + 6.0:
 		return "bell"
 	if pos.distance_to(BIN_POS) < 32.0:
@@ -447,9 +450,9 @@ func _hit_test(pos: Vector2) -> String:
 	if pos.distance_to(RULER_POS) < 34.0:
 		return "ruler"
 	if step == Step.PULL:
-		if _axis_rect("h").has_point(pos):
+		if _axis_rect("h").grow_individual(0.0, 4.0, 0.0, 4.0).has_point(pos):
 			return "axis:h"
-		if _axis_rect("v").has_point(pos):
+		if _axis_rect("v").grow_individual(0.0, 4.0, 0.0, 4.0).has_point(pos):
 			return "axis:v"
 	if step == Step.CHOOSE:
 		for i in cards.size():
@@ -499,6 +502,7 @@ func _draw() -> void:
 	_draw_bell()
 	_draw_choose_cards()
 	_draw_gift()
+	_draw_undo_button()
 	_draw_cut_preview()
 	_draw_ruler_overlay()
 	_draw_tooltip()
@@ -607,6 +611,9 @@ func _draw_tooltip() -> void:
 	elif hover == "ruler":
 		text = "Ruler"
 		at = RULER_POS + Vector2(0, -50)
+	elif hover == "undo":
+		text = "Undo the last fold"
+		at = UNDO_RECT.get_center() + Vector2(0, -50)
 	elif hover.begins_with("spool:"):
 		var si := int(hover.get_slice(":", 1))
 		if si >= 0 and si < inv_ribbons.size():
@@ -1039,6 +1046,9 @@ func _on_motion(pos: Vector2) -> void:
 
 func _on_press(pos: Vector2) -> void:
 	var hit := _hit_test(pos)
+	if hit == "undo":
+		undo_action()
+		return
 	if hit == "bell":
 		_try_deliver()
 		return
@@ -1097,7 +1107,7 @@ func _on_press(pos: Vector2) -> void:
 				pull_press = pos
 				last_pull_len = sheet_len
 	elif step == Step.WRAP:
-		if active_tool == "" and not ribbon_strokes.is_empty() and _has_ribbon() and _bow_hit(pos):
+		if not ribbon_strokes.is_empty() and _has_ribbon() and _bow_grab(pos):
 			bow_drag = true
 			bow_drag_y = pos.y
 			bow_drag_start = bow_size
@@ -1295,7 +1305,7 @@ func _do_cut_line(u_top: float, u_bot: float, wobble: float) -> void:
 		toast.emit("Not enough paper: the gift may come out crooked")
 	elif absf(cut_skew) > 24.0:
 		toast.emit("The cut came out slanted: the flaps will be uneven")
-	_hint("Fold the paper: grab it and drag it over the gift. A fold in the middle is stopped by the gift. Right click undoes")
+	_hint("Fold the paper: grab it and drag it over the gift. A fold in the middle stops at the gift. Undo button (or right click) undoes")
 
 
 ## --- Складывание: геометрия лежит в scripts/paper_fold.gd -------------------------------------
@@ -1673,7 +1683,7 @@ func _ribbon_press(pos: Vector2) -> void:
 		ribbon_end_vis = ribbon_anchor
 		ribbon_anchored = true
 		AudioSynth.play_sfx("ribbon")
-		_hint("Now the ribbon follows you. Click the other edge to lay it down (right click cancels)")
+		_hint("Now the ribbon follows you. Click the other edge to lay it down. Undo button (or right click) cancels")
 		return
 	var e: Vector2 = sn["pt"]
 	if not _ribbon_piece_ok(ribbon_anchor, e):
@@ -1682,7 +1692,7 @@ func _ribbon_press(pos: Vector2) -> void:
 		return
 	_place_ribbon(ribbon_anchor, e)
 	ribbon_anchored = false
-	_hint("Ribbon laid. Lay another one, or hand over the gift")
+	_hint("Ribbon laid. Lay another one, drag the bow to resize it, or hand over the gift")
 
 
 func _place_ribbon(a: Vector2, b: Vector2) -> void:
@@ -1721,6 +1731,16 @@ func _bow_pos() -> Vector2:
 		var pts: PackedVector2Array = st["pts"]
 		sum += pts[pts.size() / 2]
 	return sum / float(ribbon_strokes.size())
+
+
+## Бант можно взять и растянуть пальцем: без инструмента по всему банту, с катушкой в руке только за самую середину
+## (у края маленького подарка щелчок должен ставить ленту).
+func _bow_grab(pos: Vector2) -> bool:
+	if active_tool == "":
+		return _bow_hit(pos)
+	if active_tool == "ribbon" and not ribbon_anchored:
+		return (pos - CENTER - _bow_pos()).length() < 24.0 * bow_size + 8.0
+	return false
 
 
 func _bow_hit(pos: Vector2) -> bool:
@@ -1903,6 +1923,33 @@ func _draw_ribbon_path(pts: PackedVector2Array, age: float, ribbon_id: String, a
 		sh.append(q + Vector2(2.0, 3.0))
 	draw_polyline(sh, Color(0, 0, 0, 0.22 * alpha), w, false)
 	_draw_band(sp, w, T_BANDS[ribbon_id], fposmod(pts[0].x * 0.013 + pts[0].y * 0.009, 1.0), Color(1, 1, 1, alpha))
+
+
+## Откат без мыши с правой кнопкой и клавиатуры: последний сгиб, а пока лента закреплена на краю, снять её.
+func undo_action() -> void:
+	if ribbon_anchored:
+		_cancel_ribbon()
+	else:
+		fold_undo()
+
+
+func _undo_visible() -> bool:
+	return step == Step.WRAP and ((fold != null and fold.fold_count() > 0) or ribbon_anchored)
+
+
+func _draw_undo_button() -> void:
+	if not _undo_visible():
+		return
+	var r := UNDO_RECT
+	var hov := hover == "undo"
+	draw_rect(Rect2(r.position + Vector2(3, 4), r.size), Color(0, 0, 0, 0.28))
+	U.fill_stroke(self, U.rect_pts(r), Color("#f0c05a") if hov else Color("#d9cdb2"), 3.5, time)
+	# стрелка «назад»: дуга и наконечник
+	var c := Vector2(r.position.x + 30.0, r.get_center().y + 2.0)
+	draw_arc(c, 12.0, PI * 0.15, PI * 1.55, 18, U.INK, 3.5)
+	var tip := c + Vector2(cos(PI * 0.15), sin(PI * 0.15)) * 12.0
+	draw_colored_polygon(PackedVector2Array([tip + Vector2(7, -3), tip + Vector2(-5, -8), tip + Vector2(-2, 7)]), U.INK)
+	draw_string(font, Vector2(r.position.x + 52.0, r.get_center().y + 8.0), "Undo", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, U.INK)
 
 
 func _axis_rect(a: String) -> Rect2:
@@ -2140,7 +2187,7 @@ func _draw_piece(paper: Dictionary, pc: Dictionary) -> void:
 	if r.size.x >= 0.5 and r.size.y >= 0.5:
 		_draw_print(r, paper, r.position.x, 1.0, flat)
 	if det < 0.0:
-		draw_colored_polygon(flat, Color(1, 1, 1, 0.13))   # обратная сторона листа чуть светлее
+		draw_colored_polygon(flat, Color(1, 1, 1, 0.05))   # обратная сторона листа чуть светлее
 	if moving:
 		draw_colored_polygon(flat, Color(0, 0, 0, 0.10 * sin(phi)))
 	# faint crease lines stay on folded pieces
@@ -2200,7 +2247,7 @@ func _draw_piece_mesh(paper: Dictionary, pc: Dictionary) -> void:
 	var pos: PackedVector2Array = st["pos"]
 	var base := Color.html(str(paper["base"]))
 	if xf.determinant() < 0.0:
-		base = base.lerp(Color(1, 1, 1), 0.13)
+		base = base.lerp(Color(1, 1, 1), 0.05)
 	var colors := PaperMesh.shade(pos, st["z"], m["tris"], base, ao)
 	var base_xf := _paper_base_xf()
 	draw_set_transform_matrix(base_xf)

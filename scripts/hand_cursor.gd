@@ -5,6 +5,8 @@ extends CanvasLayer
 ## все выровнены так, чтобы кончик пальца или инструмента был в одной точке (HOT) и совпадал с точкой клика.
 
 const ATLAS := preload("res://art/cursor/hand_atlas.png")
+const U = preload("res://scripts/util.gd")
+const TOUCH_LINGER := 0.7   # на телефоне рука видна, пока палец на экране, и ещё столько секунд после
 const CELL := 240.0     # размер клетки в атласе
 const HOT := 48.0       # точка клика внутри клетки (в px атласа)
 const SCALE := 0.5      # игровых px на px атласа
@@ -41,6 +43,8 @@ var pose := "point"
 var frame := 0
 var ribbon_col := 0
 var ribbon_row := 0
+var touch := false          # телефон или планшет: рука не висит над экраном после касания
+var idle_t := 99.0
 
 
 func _ready() -> void:
@@ -49,6 +53,7 @@ func _ready() -> void:
 	add_child(canvas)
 	canvas.draw.connect(_draw_hand)
 	Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+	touch = U.is_touch()
 	get_window().mouse_exited.connect(func(): shown = false)
 
 
@@ -63,6 +68,9 @@ func _process(delta: float) -> void:
 	t += delta
 	snip_t += delta
 	var pressed := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if touch:
+		idle_t = 0.0 if pressed else idle_t + delta
+		canvas.modulate.a = 1.0 - smoothstep(TOUCH_LINGER * 0.5, TOUCH_LINGER, idle_t)
 	if pressed and pose == "pet":
 		pet_phase += delta * 2.5   # лёгкое движение и без мыши, чтобы рука не замирала
 	pose = _pose_name()
@@ -116,7 +124,7 @@ func _frame_for(p: String, pressed: bool) -> int:
 
 
 func _draw_hand() -> void:
-	if not shown:
+	if not shown or (touch and idle_t >= TOUCH_LINGER):
 		return
 	var pos := canvas.get_global_mouse_position()
 	var atlas: Texture2D = ATLAS

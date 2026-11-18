@@ -1,6 +1,7 @@
 extends CanvasLayer
 
 const UI = preload("res://scripts/ui_kit.gd")
+const U = preload("res://scripts/util.gd")
 const Story = preload("res://scripts/story.gd")
 ## Интерфейс: подсказки, баннер вечера, стартовый экран, итоги вечера с расходами,
 ## лавка поставщика (магазин) и финал.
@@ -37,7 +38,7 @@ func _ready() -> void:
 	layer = 10
 	hint_label = _make_label("", 17, Color(1.0, 0.95, 0.82, 0.85), Vector2(262, 684), Vector2(760, 26))
 	add_child(hint_label)
-	toast_label = _make_label("", 22, Color(1.0, 0.9, 0.55), Vector2(262, 112), Vector2(760, 30))
+	toast_label = _make_label("", 28 if U.is_touch() else 22, Color(1.0, 0.9, 0.55), Vector2(262, 112), Vector2(760, 36))
 	toast_label.modulate.a = 0.0
 	add_child(toast_label)
 	title_label = _make_label("", 64, Color(1, 0.96, 0.86), Vector2(240, 246), Vector2(800, 76), HORIZONTAL_ALIGNMENT_CENTER, true)
@@ -55,7 +56,7 @@ func _ready() -> void:
 # --- Публичное API -----------------------------------------------------------
 
 func set_hint(text: String) -> void:
-	hint_label.text = text
+	hint_label.text = U.touch_text(text)
 	if _hint_tween:
 		_hint_tween.kill()
 	hint_label.modulate.a = 0.0
@@ -64,7 +65,7 @@ func set_hint(text: String) -> void:
 
 
 func show_toast(text: String) -> void:
-	toast_label.text = text
+	toast_label.text = U.touch_text(text)
 	if _toast_tween:
 		_toast_tween.kill()
 	toast_label.modulate.a = 1.0
@@ -274,7 +275,7 @@ func _build_start() -> void:
 	tag.add_theme_color_override("font_outline_color", Color(0.18, 0.05, 0.04, 0.95))
 	tag.add_theme_constant_override("outline_size", 8)
 	start_root.add_child(tag)
-	var prompt := _make_label("Click to start", 40, Color(1.0, 0.9, 0.62), Vector2(0, 626), Vector2(1280, 50), HORIZONTAL_ALIGNMENT_CENTER, true)
+	var prompt := _make_label(U.touch_text("Click to start"), 40, Color(1.0, 0.9, 0.62), Vector2(0, 626), Vector2(1280, 50), HORIZONTAL_ALIGNMENT_CENTER, true)
 	prompt.add_theme_color_override("font_outline_color", Color(0.18, 0.05, 0.04, 0.95))
 	prompt.add_theme_constant_override("outline_size", 8)
 	start_root.add_child(prompt)
