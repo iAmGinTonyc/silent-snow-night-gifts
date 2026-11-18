@@ -213,6 +213,9 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 				failed = true
 	await create_timer(0.8).timeout
 	var nt: Dictionary = w._neatness()
+	if absf(w.meter_neat - float(nt["neat"])) > 0.001:
+		print("   quality meter shows ", w.meter_neat, " but the gift scores ", nt["neat"])
+		failed = true
 	print("   neat=%.2f cover=%.2f ends=%d" % [nt["neat"], nt["cover"], nt["ends"]])
 	w._try_deliver()
 	return true

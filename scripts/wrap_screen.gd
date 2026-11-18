@@ -71,6 +71,8 @@ const RULER_POS := Vector2(COL_R, 506)
 const BELL_POS := Vector2(1147, 578)
 const BELL_R := 31.0
 const AXIS_POS := Vector2(333, 192)
+const METER_RECT := Rect2(470, 590, 340, 22)   # оценка качества упаковки внизу зелёной части экрана
+const REWRAP_NEAT := 0.5                      # ниже этого клиент просит переделать (значение задаёт main.gd)
 const UNDO_RECT := Rect2(330, 538, 132, 64)   # кнопка отката в левом нижнем углу мата (на сенсорном экране нет правой кнопки)   # левый верхний угол кнопки Horizontal (внутри контура мата)
 const PX_PER_CM := 6.0      # масштаб линейки: 1 см = 6 px
 const CARD_SIZE := Vector2(200, 240)
@@ -157,6 +159,9 @@ var fold_P := Vector2.ZERO            # где схватили (координ�
 var fold_cur: Dictionary = {}         # параметры сгиба под рукой: {valid, n, c, phi, err, on_edge}
 var fold_anim: Dictionary = {}        # сгиб, который доводится сам: {n, c, phi, target, kind}
 var fold_snd_phi := 0.0
+var meter_neat := 0.0                 # текущая оценка 0..1 (та же, что уйдёт в res["neat"])
+var meter_vis := 0.0
+var meter_dirty := true
 var pmesh = PaperMesh.new()           # сетка частиц для куска, который сейчас гнётся
 var mesh_enabled := true
 var mesh_ms := 0.0                    # среднее время на частицы за кадр (мс), для замеров
@@ -509,6 +514,7 @@ func _draw() -> void:
 	_draw_choose_cards()
 	_draw_gift()
 	_draw_undo_button()
+	_draw_quality_meter()
 	_draw_cut_preview()
 	_draw_ruler_overlay()
 	_draw_tooltip()
@@ -923,6 +929,9 @@ func _reset_gift_state() -> void:
 	axis = "h"
 	rot = 0.0
 	fold = null
+	meter_neat = 0.0
+	meter_vis = 0.0
+	meter_dirty = true
 	gift_hull = PackedVector2Array()
 	fold_drag = false
 	fold_anim = {}
@@ -1001,6 +1010,10 @@ func _process(delta: float) -> void:
 		_update_package(delta)
 		if not fold_drag and fold_anim.is_empty():
 			pmesh.clear_states()
+			if meter_dirty and fold != null and not fold.is_empty():
+				meter_dirty = false
+				meter_neat = float(_neatness()["neat"])
+		meter_vis = lerpf(meter_vis, meter_neat, 1.0 - exp(-8.0 * delta))
 	queue_redraw()
 
 
@@ -1329,6 +1342,7 @@ func _init_fold() -> void:
 	crumples = 0
 	pkg_loose0 = maxf(fold.loose_area(fold_ref), 1.0)
 	pkg_dirty = true
+	meter_dirty = true
 	tucked = false
 	tuck_t = 0.0
 	tail_t = 0.0
@@ -1533,6 +1547,7 @@ func fold_undo() -> void:
 	if e.is_empty():
 		return
 	crumples += 1
+	meter_dirty = true
 	fold_anim = {"n": e["n"], "c": e["c"], "phi": PI, "target": 0.0, "kind": "undo", "err": 0.0, "on_edge": false}
 	pkg_dirty = true
 	AudioSynth.play_sfx("paper_rustle", -2.0, 0.8)
@@ -1559,6 +1574,7 @@ func _update_fold_anim(delta: float) -> void:
 		AudioSynth.play_sfx("paper_rustle", -3.0, 0.9)
 	fold_anim = {}
 	pkg_dirty = true
+	meter_dirty = true
 
 
 ## Подарок считается завёрнутым, когда вещь почти целиком закрыта сложенной бумагой и снаружи не торчит лишняя не сложенная бумага.
@@ -1751,6 +1767,7 @@ func _end_stroke() -> void:
 	if stroke_kind == "tape":
 		AudioSynth.play_sfx("tape_stick")
 		tape_strokes.append({"pts": pts, "len": total, "age": 0.0})
+		meter_dirty = true
 		_spend("tape", maxi(roundi(total / TAPE_COST_PER), 1), CENTER + last + Vector2(0, -34))
 	else:
 		var had := _has_ribbon()
@@ -2069,6 +2086,26 @@ func undo_action() -> void:
 		_cancel_ribbon()
 	else:
 		fold_undo()
+
+
+## Живая оценка качества упаковки: полоса с отметкой «ниже этого клиент попросит переделать».
+func _draw_quality_meter() -> void:
+	if step != Step.WRAP or fold == null:
+		return
+	var r := METER_RECT
+	var v := clampf(meter_vis, 0.0, 1.0)
+	var low := meter_neat < REWRAP_NEAT
+	var col := Color("#d8584a") if v < REWRAP_NEAT else (Color("#e8b84a") if v < 0.75 else Color("#5fae5a"))
+	draw_rect(Rect2(r.position + Vector2(3, 4), r.size), Color(0, 0, 0, 0.28))
+	draw_rect(r, Color(0.12, 0.08, 0.07, 0.9))
+	draw_rect(Rect2(r.position, Vector2(r.size.x * v, r.size.y)), col)
+	var mark_x := r.position.x + r.size.x * REWRAP_NEAT
+	draw_line(Vector2(mark_x, r.position.y - 4.0), Vector2(mark_x, r.end.y + 4.0), Color(1, 0.96, 0.85, 0.9), 2.0)
+	U.stroke(self, U.rect_pts(r), U.INK, 3.0, time, 0.0)
+	var txt := "Wrap quality %d%%" % roundi(meter_neat * 100.0)
+	if low:
+		txt += " · will need a rewrap"
+	_label(Vector2(r.get_center().x, r.position.y + 17.0), txt, 16)
 
 
 func _undo_visible() -> bool:
