@@ -12,6 +12,8 @@ const Data = preload("res://scripts/data.gd")
 const U = preload("res://scripts/util.gd")
 const Shapes = preload("res://scripts/shapes.gd")
 const ItemArt = preload("res://scripts/item_art.gd")
+const Fold = preload("res://scripts/paper_fold.gd")
+const PaperMesh = preload("res://scripts/paper_mesh.gd")
 
 # --- Раскладка (пиксели при окне 1280x720) ---
 const CENTER := Vector2(640, 393)
@@ -68,6 +70,7 @@ const SCISSORS_POS := Vector2(COL_L, 502)
 const RULER_POS := Vector2(COL_R, 506)
 const BELL_POS := Vector2(1147, 578)
 const BELL_R := 31.0
+const AXIS_POS := Vector2(333, 192)   # левый верхний угол кнопки Horizontal (внутри контура мата)
 const PX_PER_CM := 6.0      # масштаб линейки: 1 см = 6 px
 const CARD_SIZE := Vector2(200, 240)
 
@@ -87,10 +90,18 @@ const STROKE_MAX := 8
 const REACH := 12.0           # насколько за край бумаги можно вести скотч и ленту
 const RIBBON_PICK := 34.0     # на каком расстоянии от края можно «взять» начало ленты
 const RIBBON_MIN_PIECE := 36.0  # самый короткий кусок ленты от края до края
-const MAX_TILT := 0.6         # самый косой загиб, радианы (около 34 градусов)
+const FOLD_MIN_DRAG := 12.0   # меньше этого рука просто лежит на бумаге
+const FOLD_COMMIT_PHI := 1.22 # около 70 градусов: дальше сгиб довершается сам, меньше — пружинит назад
+const FOLD_SNAP_DEG := 5.0    # линия сгиба в пределах этого угла от оси или диагонали становится ровной
+const FOLD_SNAP_EDGE := 10.0  # сгиб ближе этого к ребру вещи ложится точно на ребро
+const CURL_R := 18.0          # радиус изгиба бумаги у сгиба, пока клапан в движении
+const MESH_STIFF := 40.0      # пружина частиц бумаги
+const MESH_DAMP := 8.0
+const MESH_SETTLE := 0.2      # сколько частицы «усаживаются» после доводки сгиба
+const TUCK_COVER := 0.95      # какая доля вещи закрыта сложенной бумагой, чтобы подарок считался завёрнутым
 const CUT_EDGE_TOL := 18.0    # насколько можно не дотянуть разрез до длинного края листа
 const CUT_MIN_PATH := 28.0    # короче этого путь ножниц — просто клик, не разрез
-const FOLD_SNAP_ANGLE := 1.05
+const CUT_RESUME_R := 34.0    # на каком расстоянии от кончика щели можно продолжить разрез
 const BOX_PAD := 36.0         # запас коробки вокруг вещи
 const SHAPE_PAD := 6.0        # бумага чуть шире силуэта
 
@@ -129,14 +140,25 @@ var paper_shift := 0.0  # смещение отрезанного куска к 
 var axis := "h"         # вдоль какой оси тянут бумагу: h — горизонтально, v — вертикально
 var rot := 0.0          # поворот бумаги относительно стола (0 или PI/2)
 var last_pull_len := 0.0
-var fold_snd_theta := 0.0   # при каком угле клапана играл последний шорох складывания
-## Четыре клапана: 0 — левый, 1 — правый, 2 — верхний, 3 — нижний.
-var theta: Array[float] = [PI, PI, PI, PI]
-var theta_target: Array[float] = [PI, PI, PI, PI]
-var folded: Array[bool] = [false, false, false, false]
-var fold_order: Array[int] = []
-var flap_drag := -1
-var tucked := false      # все четыре края загнуты
+var fold = null                       # модель складывания (scripts/paper_fold.gd)
+var gift_hull := PackedVector2Array() # вещь F в координатах бумаги: коробка или выпуклая оболочка силуэта
+var fold_ref := PackedVector2Array()  # прямоугольник вокруг вещи: бумага вне него должна быть сложена
+var fold_drag := false                # рука держит бумагу
+var fold_grab_idx := -1
+var fold_grab_layer := 0
+var fold_P := Vector2.ZERO            # где схватили (координаты бумаги)
+var fold_cur: Dictionary = {}         # параметры сгиба под рукой: {valid, n, c, phi, err, on_edge}
+var fold_anim: Dictionary = {}        # сгиб, который доводится сам: {n, c, phi, target, kind}
+var fold_snd_phi := 0.0
+var pmesh = PaperMesh.new()           # сетка частиц для куска, который сейчас гнётся
+var mesh_enabled := true
+var mesh_ms := 0.0                    # среднее время на частицы за кадр (мс), для замеров
+var mesh_particles := 0
+var last_delta := 0.016               # при каком угле играл последний шорох
+var crumples := 0                     # сколько раз сгиб откатывали
+var pkg_dirty := true
+var pkg_loose0 := 1.0                 # торчащая бумага до первого сгиба
+var tucked := false                   # вещь закрыта сложенной бумагой
 var tuck_t := 0.0
 
 var tape_strokes: Array = []     # {pts, len, age}
@@ -153,8 +175,6 @@ var ribbon_idx := -1
 var ribbon_anchored := false          # лента закреплена на одном краю и тянется за курсором
 var ribbon_anchor := Vector2.ZERO     # точка на краю подарка (локальные координаты)
 var ribbon_end_vis := Vector2.ZERO    # где сейчас кончик натягивающейся ленты (плавно догоняет цель)
-var tilt: Array[float] = [0.0, 0.0, 0.0, 0.0]   # поворот линии сгиба каждого клапана (0 — ровный загиб)
-var flap_grab := Vector2.ZERO         # где схватили клапан (координаты бумаги)
 var cut_skew := 0.0                   # на сколько линия реза уходит вдоль листа сверху вниз (px), 0 — ровный срез
 var cut_wobble := 0.0                 # на сколько рука увела ножницы от прямой (px)
 var cut_mark_err := 0.0               # на сколько срез ушёл от линии, размеченной линейкой (px)
@@ -287,6 +307,7 @@ func _set_axis(a: String) -> void:
 	axis = a
 	rot = 0.0 if a == "h" else PI * 0.5
 	cut_mark = PackedVector2Array()
+	cut_pts = PackedVector2Array()
 	pull_len = _pull_min()
 	sheet_len = pull_len
 	pull_moved = false
@@ -390,7 +411,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				_on_release()
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
-			_cancel_ribbon()
+			if ribbon_anchored:
+				_cancel_ribbon()
+			else:
+				fold_undo()
 		elif mb.pressed and (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 			if step == Step.WRAP and not ribbon_strokes.is_empty():
 				var d := 0.1 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else -0.1
@@ -401,6 +425,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var ke := event as InputEventKey
 		if ke.pressed and ke.keycode == KEY_ESCAPE:
 			_cancel_ribbon()
+		elif ke.pressed and ke.keycode == KEY_Z and (ke.ctrl_pressed or ke.meta_pressed):
+			fold_undo()
 
 
 func _card_rect(i: int) -> Rect2:
@@ -565,7 +591,7 @@ func _label(at: Vector2, text: String, size: int = 14) -> void:
 
 ## Подсказка над предметом под мышью: название на тёмной плашке, всегда поверх соседей.
 func _draw_tooltip() -> void:
-	if hover == "" or stroking or pulling or flap_drag >= 0:
+	if hover == "" or stroking or pulling or fold_drag:
 		return
 	var text := ""
 	var at := Vector2.ZERO
@@ -767,14 +793,22 @@ func _draw_choose_cards() -> void:
 			draw_string(font, Vector2(r.position.x, r.end.y - 52.0), str(bx["name"]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, U.INK)
 			draw_string(font, Vector2(r.position.x, r.end.y - 24.0), "Cost: %d" % int(bx["cost"]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 17, Color(0.7, 0.32, 0.25))
 		else:
-			var kind := item_kind
-			var sil := Shapes.silhouette(kind)
-			var bound := maxf(raw_w, raw_h)
-			var k := 120.0 / bound
-			var scaled := PackedVector2Array()
-			for p in sil:
-				scaled.append(center + Vector2(0, -26) + p * k)
-			U.fill_stroke(self, scaled, Color.html(item["color"]), 4.0, time)
+			var ttex := _top_tex()
+			if ttex != null:
+				# настоящая картинка вещи сверху, как коробка на соседней карточке
+				var box := Vector2(124.0, 104.0)
+				var sc := minf(box.x / float(ttex.get_width()), box.y / float(ttex.get_height()))
+				var tsz := Vector2(ttex.get_width(), ttex.get_height()) * sc
+				var tc := center + Vector2(0, -22)
+				draw_colored_polygon(U.ellipse(tc + Vector2(0, tsz.y * 0.5 - 2.0), tsz.x * 0.4, 6.0), Color(0, 0, 0, 0.16))
+				draw_texture_rect(ttex, Rect2(tc - tsz * 0.5, tsz), false)
+			else:
+				var sil := Shapes.silhouette(item_kind)
+				var k := 120.0 / maxf(raw_w, raw_h)
+				var scaled := PackedVector2Array()
+				for p in sil:
+					scaled.append(center + Vector2(0, -26) + p * k)
+				U.fill_stroke(self, scaled, Color.html(item["color"]), 4.0, time)
 			draw_string(font, Vector2(r.position.x, r.end.y - 52.0), "By shape", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 20, U.INK)
 			draw_string(font, Vector2(r.position.x, r.end.y - 24.0), "no box", HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 17, Color(0.45, 0.35, 0.3))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -841,6 +875,15 @@ func _draw_box_art(r: Rect2, col: Color, lid: Color, tape: bool) -> void:
 			draw_rect(Rect2(lr.position.x, mid.y - 9.0, lr.size.x, 18.0), Color("#dccfab"))
 
 
+## Картинка вещи сверху: сначала по id вещи (bear_mid), потом по виду (bear); null, если картинки нет.
+func _top_tex() -> Texture2D:
+	if T_TOP.has(item_id):
+		return T_TOP[item_id]
+	if T_TOP.has(item_kind):
+		return T_TOP[item_kind]
+	return null
+
+
 func _draw_item_art(ir: Rect2) -> void:
 	if item_kind == "box":
 		var col := Color.html(item["color"])
@@ -866,11 +909,13 @@ func _reset_gift_state() -> void:
 	paper_shift = 0.0
 	axis = "h"
 	rot = 0.0
-	theta = [PI, PI, PI, PI]
-	theta_target = [PI, PI, PI, PI]
-	folded = [false, false, false, false]
-	fold_order = []
-	flap_drag = -1
+	fold = null
+	gift_hull = PackedVector2Array()
+	fold_drag = false
+	fold_anim = {}
+	fold_cur = {}
+	crumples = 0
+	pkg_dirty = true
 	tucked = false
 	tuck_t = 0.0
 	tape_strokes = []
@@ -881,7 +926,6 @@ func _reset_gift_state() -> void:
 	active_tool = ""
 	ribbon_idx = -1
 	ribbon_anchored = false
-	tilt = [0.0, 0.0, 0.0, 0.0]
 	cut_skew = 0.0
 	cut_wobble = 0.0
 	cut_mark_err = 0.0
@@ -908,6 +952,7 @@ func _reset_gift_state() -> void:
 
 func _process(delta: float) -> void:
 	time += delta
+	last_delta = delta
 	bell_shake = maxf(bell_shake - delta, 0.0)
 	bin_shake = maxf(bin_shake - delta, 0.0)
 	bow_pop = minf(bow_pop + delta / 0.5, 1.0)
@@ -937,31 +982,11 @@ func _process(delta: float) -> void:
 			gift_off = Vector2.ZERO
 			gift_scale = 1.0
 			_after_arrival()
-	elif step == Step.WRAP or step == Step.PULL or step == Step.PAPER:
-		var k := 1.0 - exp(-14.0 * delta)
-		for i in 4:
-			if flap_drag != i:
-				theta[i] = lerpf(theta[i], theta_target[i], k)
-				if absf(theta[i] - theta_target[i]) < 0.004:
-					theta[i] = theta_target[i]
-		if step == Step.WRAP:
-			if not tucked and folded[0] and folded[1] and folded[2] and folded[3]:
-				var settled := true
-				for i in 4:
-					if theta[i] > 0.004:
-						settled = false
-				if settled:
-					tucked = true
-					tuck_t = 0.0
-					tail_t = 0.001
-					AudioSynth.play_sfx("fold", -3.0, 0.8)
-					_hint("Edges are folded. Tape it where you like, draw the ribbon around the gift, or hand it over")
-			if tucked:
-				if tuck_t < 1.0 or clip_cur.size() < 3:
-					tuck_t = move_toward(tuck_t, 1.0, delta / 0.45)
-					_update_clip()
-				if wrap_mode == "shape" and tail_t > 0.0:
-					tail_t = minf(tail_t + delta / 0.7, 1.0)
+	elif step == Step.WRAP:
+		_update_fold_anim(delta)
+		_update_package(delta)
+		if not fold_drag and fold_anim.is_empty():
+			pmesh.clear_states()
 	queue_redraw()
 
 
@@ -979,7 +1004,7 @@ func _update_clip() -> void:
 func cursor_pose(p: Vector2) -> String:
 	if pulling:
 		return "pinch"
-	if flap_drag >= 0:
+	if fold_drag:
 		return "grab"
 	if active_tool == "scissors" or active_tool == "tape" or active_tool == "ribbon" or active_tool == "ruler":
 		return active_tool
@@ -1006,8 +1031,8 @@ func _on_motion(pos: Vector2) -> void:
 		_cut_move(pos)
 	if pulling:
 		_update_pull(pos)
-	if flap_drag >= 0:
-		_update_flap_drag(pos)
+	if fold_drag:
+		_fold_move(pos)
 	if bow_drag:
 		bow_size = clampf(bow_drag_start + (bow_drag_y - pos.y) / 120.0, 0.6, 1.8)
 
@@ -1067,6 +1092,7 @@ func _on_press(pos: Vector2) -> void:
 				_cut_begin(pos)
 			else:
 				pulling = true
+				cut_pts = PackedVector2Array()
 				pull_moved = false
 				pull_press = pos
 				last_pull_len = sheet_len
@@ -1081,7 +1107,7 @@ func _on_press(pos: Vector2) -> void:
 		elif active_tool != "":
 			_begin_stroke(pos)
 		elif MAT_RECT.has_point(pos) and absf(paper_shift) < 2.0:
-			_begin_flap_drag(pos)
+			_fold_begin(pos)
 
 
 func _on_release() -> void:
@@ -1092,8 +1118,8 @@ func _on_release() -> void:
 	if pulling:
 		pulling = false
 		_finish_pull()
-	if flap_drag >= 0:
-		_end_flap_drag()
+	if fold_drag:
+		_fold_end()
 	_end_stroke()
 	bow_drag = false
 
@@ -1141,54 +1167,80 @@ func _set_cut_mark() -> void:
 	toast.emit("Line marked. Take the scissors and cut along it")
 
 
-## Ножницы зажаты на листе: ведут разрез от края до края.
+## Ножницы зажаты: разрез растёт за ними. Начать можно у длинного края листа, а если отпустили раньше времени,
+## щель остаётся и её можно продолжить, нажав у её кончика.
 func _cut_begin(pos: Vector2) -> void:
+	var lp := _to_paper(pos - CENTER)
+	var y_edge := _across() * 0.5 + MARGIN
+	if cut_pts.size() >= 2 and lp.distance_to(cut_pts[cut_pts.size() - 1]) <= CUT_RESUME_R:
+		cutting = true
+		cut_snd = 0.0
+		AudioSynth.play_sfx("snip", -8.0, randf_range(0.95, 1.1))
+		return
+	cut_pts = PackedVector2Array()
+	if absf(lp.y) < y_edge - CUT_EDGE_TOL:
+		AudioSynth.play_sfx("dull")
+		toast.emit("Start the cut at a long edge of the paper")
+		return
 	cutting = true
 	cut_snd = 0.0
-	cut_pts = PackedVector2Array([_to_paper(pos - CENTER)])
+	cut_pts = PackedVector2Array([lp])
 	AudioSynth.play_sfx("snip", -8.0, randf_range(0.95, 1.1))
 
 
 func _cut_move(pos: Vector2) -> void:
-	if not cutting:
+	if not cutting or cut_pts.is_empty():
 		return
 	var lp := _to_paper(pos - CENTER)
 	var last := cut_pts[cut_pts.size() - 1]
 	var d := lp.distance_to(last)
 	if d < 3.0:
 		return
-	cut_pts.append(lp)
+	var n := maxi(int(d / 4.0), 1)
+	for k in range(1, n + 1):
+		cut_pts.append(last.lerp(lp, float(k) / float(n)))
 	cut_snd += d
-	if cut_snd > 30.0:
+	if cut_snd > 28.0:
 		cut_snd = 0.0
 		AudioSynth.play_sfx("snip", -9.0, randf_range(0.9, 1.25))
+	# щель дошла до противоположного длинного края: лист разрезан
+	var y_edge := _across() * 0.5 + MARGIN
+	var a := cut_pts[0]
+	if absf(lp.y) >= y_edge - CUT_EDGE_TOL and lp.y * a.y < 0.0:
+		_finish_slit()
 
 
-## Отпустили ножницы: разрез должен пройти от одного длинного края листа до другого.
+## Отпустили ножницы. Если щель не дошла до края, она остаётся на листе; совсем короткую (просто клик) убираем.
 func _cut_end() -> void:
 	if not cutting:
 		return
 	cutting = false
-	var pts := cut_pts
-	cut_pts = PackedVector2Array()
 	var total := 0.0
-	for i in range(1, pts.size()):
-		total += pts[i - 1].distance_to(pts[i])
+	for i in range(1, cut_pts.size()):
+		total += cut_pts[i - 1].distance_to(cut_pts[i])
 	if total < CUT_MIN_PATH:
+		cut_pts = PackedVector2Array()
 		AudioSynth.play_sfx("dull")
 		toast.emit("Hold the scissors and drag across the paper to cut it")
 		return
+	toast.emit("Press at the tip of the cut and keep going to the other edge")
+
+
+## Щель дошла до другого края: геометрия среза берётся из пути, который прошли ножницы.
+func _finish_slit() -> void:
+	cutting = false
+	var pts := cut_pts
+	cut_pts = PackedVector2Array()
+	if pts.size() < 2:
+		return
+	var y_edge := _across() * 0.5 + MARGIN
 	var a := pts[0]
 	var b := pts[pts.size() - 1]
-	var y_edge := _across() * 0.5 + MARGIN
-	var ok := absf(a.y) >= y_edge - CUT_EDGE_TOL and absf(b.y) >= y_edge - CUT_EDGE_TOL and a.y * b.y < 0.0
-	if not ok:
-		AudioSynth.play_sfx("dull")
-		toast.emit("Cut all the way across: from one long edge of the paper to the other")
+	var ab := b - a
+	if absf(ab.y) < 1.0:
 		return
 	# прямая реза через начало и конец пути; рука могла вилять, это идёт в штраф
 	var wob := 0.0
-	var ab := b - a
 	for q in pts:
 		wob = maxf(wob, absf(ab.cross(q - a)) / maxf(ab.length(), 1.0))
 	var ut := a.x + ab.x * (-y_edge - a.y) / ab.y
@@ -1223,6 +1275,8 @@ func _do_cut_line(u_top: float, u_bot: float, wobble: float) -> void:
 			var e2 := absf(md.cross(Vector2(u_bot, y_edge) - m0)) / md.length()
 			cut_mark_err = (e1 + e2) * 0.5
 	cut_mark = PackedVector2Array()
+	cut_pts = PackedVector2Array()
+	cutting = false
 	var cut_len := u1 - u_c
 	sheet_len = cut_len
 	paper_shift = (u_c + u1) * 0.5
@@ -1236,80 +1290,217 @@ func _do_cut_line(u_top: float, u_bot: float, wobble: float) -> void:
 	_spend("paper", _paper_cost(cut_len), CENTER + Vector2(0, -60))
 	active_tool = ""
 	step = Step.WRAP
-	theta = [PI, PI, PI, PI]
-	theta_target = [PI, PI, PI, PI]
-	folded = [false, false, false, false]
-	fold_order = []
-	tilt = [0.0, 0.0, 0.0, 0.0]
+	_init_fold()
 	if length_class == "short":
 		toast.emit("Not enough paper: the gift may come out crooked")
 	elif absf(cut_skew) > 24.0:
 		toast.emit("The cut came out slanted: the flaps will be uneven")
-	_hint("Fold the edges by hand. Drag a flap sideways to fold it at an angle")
+	_hint("Fold the paper: grab it and drag it over the gift. A fold in the middle is stopped by the gift. Right click undoes")
 
 
-func _begin_flap_drag(pos: Vector2) -> void:
-	var lp := _to_paper(pos - CENTER)
-	var fh := _flap_len()
-	var nx := absf(lp.x) / (_along() * 0.5 + maxf(fh, 20.0))
-	var ny := absf(lp.y) / (_across() * 0.5 + MARGIN)
-	var side := 0 if lp.x < 0.0 else 1
-	var end := 2 if lp.y < 0.0 else 3
-	var order: Array = [side, end, 1 - side, 5 - end] if nx >= ny else [end, side, 5 - end, 1 - side]
-	for cand in order:
-		var c: int = cand
-		if folded[c]:
-			continue
-		if c < 2 and fh < 1.0:
-			continue
-		flap_drag = c
-		flap_grab = lp
-		fold_snd_theta = theta[c]
-		AudioSynth.play_sfx("paper_rustle", -5.0, randf_range(0.9, 1.15))
-		_update_flap_drag(pos)
+## --- Складывание: геометрия лежит в scripts/paper_fold.gd -------------------------------------
+
+func _init_fold() -> void:
+	fold = Fold.new()
+	fold.reset(_sheet_poly())
+	gift_hull = _compute_hull()
+	var hb := _poly_bounds(gift_hull)
+	fold_ref = U.rect_pts(hb)
+	fold_drag = false
+	fold_anim = {}
+	fold_cur = {}
+	crumples = 0
+	pkg_loose0 = maxf(fold.loose_area(fold_ref), 1.0)
+	pkg_dirty = true
+	tucked = false
+	tuck_t = 0.0
+	tail_t = 0.0
+	clip_cur = PackedVector2Array()
+
+
+## Вещь F: прямоугольник коробки или выпуклая оболочка силуэта (с запасом) в координатах бумаги.
+func _compute_hull() -> PackedVector2Array:
+	if wrap_mode == "shape" and sil_poly.size() >= 3:
+		var h := Geometry2D.convex_hull(sil_poly)
+		if h.size() > 3 and h[0].is_equal_approx(h[h.size() - 1]):
+			h.remove_at(h.size() - 1)
+		var offs := Geometry2D.offset_polygon(h, SHAPE_PAD, Geometry2D.JOIN_ROUND)
+		return _clip_to_paper(offs[0] if offs.size() > 0 else h)
+	return U.rect_pts(Rect2(-_along() * 0.5, -_across() * 0.5, _along(), _across()))
+
+
+func fold_busy() -> bool:
+	return fold_drag or not fold_anim.is_empty()
+
+
+func fold_drag_begin(pos: Vector2) -> void:
+	_fold_begin(pos)
+
+
+func fold_drag_move(pos: Vector2) -> void:
+	_fold_move(pos)
+
+
+func fold_drag_end() -> void:
+	_fold_end()
+
+
+## Ближайшее из восьми направлений (оси и диагонали): [направление, ошибка в радианах]. Ошибка до 5 градусов выпрямляется.
+func _snap_dir(n: Vector2) -> Array:
+	var dirs: Array = [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1), Vector2(1, 1).normalized(), Vector2(-1, 1).normalized(), Vector2(1, -1).normalized(), Vector2(-1, -1).normalized()]
+	var best: Vector2 = dirs[0]
+	var bd := -2.0
+	for d in dirs:
+		var dv: Vector2 = d
+		var dd := n.dot(dv)
+		if dd > bd:
+			bd = dd
+			best = dv
+	var ang := acos(clampf(bd, -1.0, 1.0))
+	if ang <= deg_to_rad(FOLD_SNAP_DEG):
+		return [best, 0.0]
+	return [n, ang]
+
+
+## Линия сгиба по двум точкам: серединный перпендикуляр между местом, где взяли бумагу (p), и рукой (q).
+## Бумага не может двигать вещь: сгиб, двигающий слой 0, упирается в опорную прямую вещи.
+func _fold_params(p: Vector2, q: Vector2) -> Dictionary:
+	var d := p - q
+	if d.length() < FOLD_MIN_DRAG:
+		return {"valid": false}
+	var sn := _snap_dir(d.normalized())
+	var n: Vector2 = sn[0]
+	var c := n.dot((p + q) * 0.5)
+	var h := -INF
+	for v in gift_hull:
+		h = maxf(h, n.dot(v))
+	if absf(c - h) <= FOLD_SNAP_EDGE:
+		c = h
+	elif fold_grab_layer == 0 and c > h:
+		c = h   # свободный край листа переворачивается через ребро вещи целиком, а не загибается кончиком
+	c = fold.clamp_crease(n, c, gift_hull)
+	var np := n.dot(p) - c
+	if np < 0.5:
+		return {"valid": false, "blocked": true}
+	var cosp := clampf((n.dot(q) - c) / np, -1.0, 1.0)
+	return {"valid": true, "n": n, "c": c, "phi": acos(cosp), "err": float(sn[1]), "on_edge": absf(c - h) < 0.5}
+
+
+func _fold_begin(pos: Vector2) -> void:
+	if fold == null or fold.is_empty() or not fold_anim.is_empty():
 		return
-
-
-func _update_flap_drag(pos: Vector2) -> void:
-	var lp := _to_paper(pos - CENTER)
-	var i := flap_drag
-	var f := _flap_len() if i < 2 else MARGIN
-	if f < 1.0:
+	if not tape_strokes.is_empty():
+		AudioSynth.play_sfx("dull")
+		toast.emit("The paper is taped: no more folding")
 		return
-	# линия сгиба перпендикулярна движению руки: тянешь клапан вбок, он складывается по диагонали
-	var m := lp - flap_grab
-	var m_in := -m.dot(_flap_n0(i))
-	var m_lat := m.dot(_flap_d0(i))
-	var psi := 0.0
-	if m_in > 10.0 and absf(m_lat) > 8.0:
-		psi = _flap_sign(i) * clampf(atan2(m_lat, m_in), -MAX_TILT, MAX_TILT)
-	tilt[i] = lerpf(tilt[i], psi, 0.4)
-	if absf(tilt[i]) < 0.01:
-		tilt[i] = 0.0
-	var c := -(lp - _flap_pivot(i)).dot(_flap_n(i)) / f
-	theta[i] = acos(clampf(c, -1.0, 1.0))
-	theta_target[i] = theta[i]
-	if absf(theta[i] - fold_snd_theta) > 0.13:
-		fold_snd_theta = theta[i]
-		AudioSynth.play_sfx("paper_rustle", -4.0, randf_range(0.8, 1.3))
+	var tp := _to_paper(pos - CENTER)
+	var hit: Dictionary = fold.topmost_at(tp)
+	if hit.is_empty():
+		return
+	if int(hit["layer"]) == 0 and Geometry2D.is_point_in_polygon(tp, gift_hull):
+		return   # голая вещь, не бумага
+	fold_drag = true
+	fold_grab_idx = int(hit["idx"])
+	fold_grab_layer = int(hit["layer"])
+	fold_P = tp
+	fold_cur = {}
+	fold_snd_phi = 0.0
+	AudioSynth.play_sfx("paper_rustle", -5.0, randf_range(0.9, 1.15))
 
 
-func _end_flap_drag() -> void:
-	var i := flap_drag
-	flap_drag = -1
-	if theta[i] < FOLD_SNAP_ANGLE:
-		theta_target[i] = 0.0
-		folded[i] = true
-		fold_order.append(i)
-		AudioSynth.play_sfx("fold", 0.0, randf_range(0.92, 1.08))
+func _fold_move(pos: Vector2) -> void:
+	if not fold_drag:
+		return
+	fold_cur = _fold_params(fold_P, _to_paper(pos - CENTER))
+	if fold_cur.get("valid", false):
+		var ph := float(fold_cur["phi"])
+		if absf(ph - fold_snd_phi) > 0.3:
+			fold_snd_phi = ph
+			AudioSynth.play_sfx("paper_rustle", -4.0, randf_range(0.8, 1.3))
+
+
+func _fold_end() -> void:
+	if not fold_drag:
+		return
+	fold_drag = false
+	var cur := fold_cur
+	fold_cur = {}
+	if cur.get("blocked", false):
+		AudioSynth.play_sfx("dull")
+		toast.emit("The gift is in the way: the paper cannot bend there")
+		return
+	if not cur.get("valid", false):
+		return
+	var phi := float(cur["phi"])
+	var commit := phi > FOLD_COMMIT_PHI
+	fold_anim = {"n": cur["n"], "c": cur["c"], "phi": phi, "target": PI if commit else 0.0,
+		"kind": "commit" if commit else "spring", "err": cur["err"], "on_edge": cur["on_edge"]}
+
+
+## Правая кнопка или Ctrl+Z: последний сгиб раскладывается обратно, бумага при этом мнётся (штраф к аккуратности).
+func fold_undo() -> void:
+	if step != Step.WRAP or fold == null or fold_drag or not fold_anim.is_empty() or fold.fold_count() == 0:
+		return
+	var e: Dictionary = fold.undo()
+	if e.is_empty():
+		return
+	crumples += 1
+	fold_anim = {"n": e["n"], "c": e["c"], "phi": PI, "target": 0.0, "kind": "undo", "err": 0.0, "on_edge": false}
+	pkg_dirty = true
+	AudioSynth.play_sfx("paper_rustle", -2.0, 0.8)
+	toast.emit("Folded back: the paper is a bit crumpled now")
+
+
+func _update_fold_anim(delta: float) -> void:
+	if fold_anim.is_empty():
+		return
+	var target := float(fold_anim["target"])
+	var phi := move_toward(float(fold_anim["phi"]), target, delta * 8.0)
+	fold_anim["phi"] = phi
+	if absf(phi - target) > 0.001:
+		return
+	# частицы усаживаются на место, потом сгиб фиксируется в модели
+	fold_anim["settle"] = float(fold_anim.get("settle", 0.0)) + delta
+	if float(fold_anim["settle"]) < MESH_SETTLE and mesh_enabled:
+		return
+	if fold_anim["kind"] == "commit":
+		var info := {"err": fold_anim["err"], "on_edge": fold_anim["on_edge"]}
+		if fold.fold(fold_anim["n"], float(fold_anim["c"]), info):
+			AudioSynth.play_sfx("fold", 0.0, randf_range(0.92, 1.08))
 	else:
-		theta_target[i] = PI
-		tilt[i] = 0.0
-		AudioSynth.play_sfx("paper_rustle", -2.0, 0.85)
+		AudioSynth.play_sfx("paper_rustle", -3.0, 0.9)
+	fold_anim = {}
+	pkg_dirty = true
+
+
+## Подарок считается завёрнутым, когда вещь почти целиком закрыта сложенной бумагой и снаружи не торчит лишняя не сложенная бумага.
+func _update_package(delta: float) -> void:
+	if pkg_dirty and not fold_drag and fold_anim.is_empty() and fold != null:
+		pkg_dirty = false
+		var cover: float = fold.coverage(gift_hull)
+		var loose: float = fold.loose_area(fold_ref)
+		var want := cover >= TUCK_COVER and loose <= maxf(150.0, 0.03 * Fold.area(fold_ref))
+		if want and not tucked:
+			tucked = true
+			tuck_t = 0.0
+			tail_t = 0.001
+			AudioSynth.play_sfx("fold", -3.0, 0.8)
+			_hint("Wrapped. Tape it where you like, lay the ribbon around the gift, or hand it over")
+		elif not want and tucked:
+			tucked = false
+			tuck_t = 0.0
+			tail_t = 0.0
+			clip_cur = PackedVector2Array()
+	if tucked:
+		if tuck_t < 1.0 or clip_cur.size() < 3:
+			tuck_t = move_toward(tuck_t, 1.0, delta / 0.45)
+			_update_clip()
+		if wrap_mode == "shape" and tail_t > 0.0:
+			tail_t = minf(tail_t + delta / 0.7, 1.0)
 
 
 func _select_tool(tool_name: String) -> void:
-	if tool_name == "tape" and active_tool != "tape" and step == Step.WRAP and not folded.has(true):
+	if tool_name == "tape" and active_tool != "tape" and step == Step.WRAP and (fold == null or fold.fold_count() < 1):
 		AudioSynth.play_sfx("dull")
 		toast.emit("Fold the paper first, then tape it")
 		return
@@ -1331,7 +1522,7 @@ func _select_tool(tool_name: String) -> void:
 	elif active_tool == "tape":
 		_hint("Tape in hand: press and drag anywhere on the gift, as much as you need")
 	elif active_tool == "scissors":
-		_hint("Scissors in hand: press at one long edge of the paper, drag across to the other edge (along your pencil line) and let go")
+		_hint("Scissors in hand: press at a long edge and drag across along your pencil line. The paper parts when the cut reaches the other edge")
 	elif step == Step.WRAP:
 		_hint("Fold the edges, tape, draw the ribbon, or hand over the gift")
 
@@ -1356,21 +1547,10 @@ func _select_ribbon_tool(slot: int) -> void:
 
 ## Где вообще есть бумага: скотч и лента ложатся только на неё (допуск на пару px у края).
 func _stroke_region() -> PackedVector2Array:
-	if _use_poly() and not (tucked and wrap_mode == "shape" and clip_cur.size() >= 3):
-		return _paper_footprint()
 	if tucked and wrap_mode == "shape" and clip_cur.size() >= 3:
 		var offs := Geometry2D.offset_polygon(clip_cur, STROKE_TOL, Geometry2D.JOIN_ROUND)
 		return offs[0] if offs.size() > 0 else clip_cur
-	var half := maxf(sheet_len * 0.5, _along() * 0.5)
-	var xl := -_along() * 0.5 if folded[0] else -half
-	var xr := _along() * 0.5 if folded[1] else half
-	var mt := 0.0 if folded[2] else MARGIN
-	var mb := 0.0 if folded[3] else MARGIN
-	var pts := U.rect_pts(Rect2(xl - STROKE_TOL, -_across() * 0.5 - mt - STROKE_TOL, xr - xl + 2.0 * STROKE_TOL, _across() + mt + mb + 2.0 * STROKE_TOL))
-	var out := PackedVector2Array()
-	for p in pts:
-		out.append(p.rotated(rot))
-	return out
+	return _paper_footprint()
 
 
 func _begin_stroke(pos: Vector2) -> void:
@@ -1548,37 +1728,34 @@ func _bow_hit(pos: Vector2) -> bool:
 
 
 func _neatness() -> Dictionary:
-	var w := _along()
-	var f := maxf(_flap_len() - absf(cut_skew) * 0.5, 0.0)   # косой срез: на одном конце клапан короче
-	var spans: Array = []
-	if folded[0]:
-		spans.append(Vector2(-w * 0.5, -w * 0.5 + minf(f, w)))
-	if folded[1]:
-		spans.append(Vector2(w * 0.5 - minf(f, w), w * 0.5))
-	var covered := 0.0
-	if spans.size() == 1:
-		var a1: Vector2 = spans[0]
-		covered = a1.y - a1.x
-	elif spans.size() == 2:
-		var a: Vector2 = spans[0]
-		var b: Vector2 = spans[1]
-		covered = (a.y - a.x) + (b.y - b.x) - maxf(0.0, minf(a.y, b.y) - maxf(a.x, b.x))
-	var cover := clampf(covered / w, 0.0, 1.0)
-	var ends := (1 if folded[2] else 0) + (1 if folded[3] else 0)
+	var fa := maxf(Fold.area(gift_hull), 1.0)
+	var cover := 0.0
+	var loose := 0.0
+	var hang := 0.0
+	if fold != null:
+		cover = fold.coverage(gift_hull)
+		loose = fold.loose_area(fold_ref)
+		hang = fold.hanging_area(fold_ref)
+	var ends_score := 1.0 - clampf(loose / maxf(pkg_loose0, 1.0), 0.0, 1.0)
 	var tape_len := 0.0
 	for st in tape_strokes:
 		tape_len += float(st["len"])
 	var tape_ok := tape_len >= 0.6 * _across()
-	var neat := 0.55 * cover + 0.10 * float(ends) + (0.25 if tape_ok else 0.0)
-	# кривой срез, виляние ножниц, уход от размеченной линии и косые загибы выглядят неряшливо
+	var neat := 0.55 * cover + 0.20 * ends_score + (0.25 if tape_ok else 0.0)
+	# торчащие сложенные куски, кривые сгибы по ребру вещи, откаты и лишние сгибы, кривой срез, виляние ножниц
+	var pen := clampf(hang / fa * 0.4, 0.0, 0.15)
+	var folds_n := 0
+	if fold != null:
+		folds_n = fold.fold_count()
+		for e in fold.history:
+			var info: Dictionary = e["info"]
+			pen += clampf(float(info.get("err", 0.0)) * 0.25, 0.0, 0.08)
+	pen += clampf(float(crumples) * 0.05, 0.0, 0.15) + clampf(float(folds_n - 6) * 0.03, 0.0, 0.09)
 	var y_edge := _across() * 0.5 + MARGIN
-	var pen := clampf(absf(cut_skew) / (2.0 * y_edge) * 0.6, 0.0, 0.25)
+	pen += clampf(absf(cut_skew) / (2.0 * y_edge) * 0.6, 0.0, 0.25)
 	pen += clampf(cut_wobble / 60.0, 0.0, 0.1) + clampf(cut_mark_err / 80.0, 0.0, 0.15)
-	for fi in 4:
-		if folded[fi]:
-			pen += clampf(absf(tilt[fi]) * 0.25, 0.0, 0.1)
 	neat -= pen
-	return {"neat": clampf(neat, 0.0, 1.0), "cover": cover, "ends": ends, "tape_len": tape_len, "tape_ok": tape_ok}
+	return {"neat": clampf(neat, 0.0, 1.0), "cover": cover, "ends": int(round(ends_score * 2.0)), "tape_len": tape_len, "tape_ok": tape_ok}
 
 
 ## Выбросить текущий подарок и начать заново (потраченные материалы не возвращаются).
@@ -1599,10 +1776,10 @@ func _discard() -> void:
 func _try_deliver() -> void:
 	if step == Step.IDLE or step == Step.ARRIVING or step == Step.DELIVER:
 		return
-	if step != Step.WRAP or not (folded[0] or folded[1] or folded[2] or folded[3]):
+	if step != Step.WRAP or fold == null or fold.fold_count() < 1:
 		bell_shake = 0.4
 		AudioSynth.play_sfx("dull")
-		toast.emit("The gift is not wrapped yet: fold at least one edge")
+		toast.emit("The gift is not wrapped yet: fold the paper over it")
 		return
 	var nt := _neatness()
 	var rid := ""
@@ -1729,8 +1906,8 @@ func _draw_ribbon_path(pts: PackedVector2Array, age: float, ribbon_id: String, a
 
 
 func _axis_rect(a: String) -> Rect2:
-	# Две кнопки друг под другом в левом верхнем углу: рулон (слева или сверху) их не задевает.
-	return Rect2(MAT_RECT.position.x + 14.0, MAT_RECT.position.y + 12.0 + (0.0 if a == "h" else 46.0), 130.0, 38.0)
+	# Две кнопки друг под другом целиком на зелёном мате, в 28 px от его чёрного контура слева и сверху.
+	return Rect2(AXIS_POS.x, AXIS_POS.y + (0.0 if a == "h" else 44.0), 130.0, 36.0)
 
 
 ## Кнопки выбора направления, в котором тянут бумагу.
@@ -1835,7 +2012,7 @@ func _draw_ruler_overlay() -> void:
 	var gcol := Color("#8fe0c0")
 	_dim_line(c + Vector2(-half.x, half.y + 20.0), c + Vector2(half.x, half.y + 20.0), "%d cm" % roundi(item_w / PX_PER_CM), gcol, Vector2(0, 22))
 	_dim_line(c + Vector2(half.x + 20.0, -half.y), c + Vector2(half.x + 20.0, half.y), "%d cm" % roundi(item_h / PX_PER_CM), gcol, Vector2(40, 0))
-	if (step == Step.PULL or step == Step.WRAP) and not folded.has(true) and not tucked:
+	if (step == Step.PULL or step == Step.WRAP) and (fold == null or fold.fold_count() == 0) and not tucked:
 		var plen := pull_len if step == Step.PULL else sheet_len
 		var need := _l_min()
 		var pcol := Color("#ffe07a") if plen >= need else Color("#ff9a7a")
@@ -1855,9 +2032,8 @@ func _draw_cut_preview() -> void:
 	if cut_mark.size() == 2:
 		draw_line(cut_mark[0], cut_mark[1], Color(1, 1, 1, 0.45), 6.0)
 		draw_dashed_line(cut_mark[0], cut_mark[1], Color(0.2, 0.18, 0.22, 0.95), 2.5, 7.0)
-	if cutting and cut_pts.size() >= 2:
-		draw_polyline(cut_pts, Color(1.0, 0.45, 0.4, 0.95), 3.0, true)
-		draw_circle(cut_pts[cut_pts.size() - 1], 5.0, Color(1.0, 0.45, 0.4))
+	if cut_pts.size() >= 2:
+		_draw_slit()
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if active_tool == "scissors" and MAT_RECT.has_point(mouse_pos):
 		var txt := "Drag across the paper to cut"
@@ -1868,104 +2044,28 @@ func _draw_cut_preview() -> void:
 		_label(mouse_pos + Vector2(70, -18), txt, 16)
 
 
-## --- Полигоны листа: косой срез и косые загибы -----------------------------------------------
-
-func _use_poly() -> bool:
-	if absf(cut_skew) > 0.5:
-		return true
-	for i in 4:
-		if absf(tilt[i]) > 0.01:
-			return true
-	return false
-
-
-func _flap_n0(i: int) -> Vector2:
-	return [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)][i]
-
-
-func _flap_d0(i: int) -> Vector2:
-	return Vector2(0, 1) if i < 2 else Vector2(1, 0)
+## Щель в бумаге: тёмная линия, за ножницами она чуть раскрыта и видно стол, у кончика смыкается.
+func _draw_slit() -> void:
+	var n := cut_pts.size()
+	var from_tip := 0.0
+	for k in range(n - 1, 0, -1):
+		var a := cut_pts[k - 1]
+		var b := cut_pts[k]
+		from_tip += a.distance_to(b)
+		var gap := clampf(0.8 + from_tip * 0.05, 0.8, 4.0)
+		draw_line(a, b, Color(0.05, 0.11, 0.07, 0.95), gap + 1.6)
+		draw_line(a, b, Color(0.2, 0.37, 0.24, 1.0), gap)
+	var tip := cut_pts[n - 1]
+	draw_circle(tip, 4.0 if cutting else 6.0 + sin(time * 6.0), Color(1.0, 0.85, 0.5, 0.9))
 
 
-func _flap_sign(i: int) -> float:
-	return [1.0, -1.0, -1.0, 1.0][i]
-
-
-func _flap_pivot(i: int) -> Vector2:
-	var hw := _along() * 0.5
-	var hh := _across() * 0.5
-	return [Vector2(-hw, 0), Vector2(hw, 0), Vector2(0, -hh), Vector2(0, hh)][i]
-
-
-func _flap_d(i: int) -> Vector2:
-	return _flap_d0(i).rotated(tilt[i])
-
-
-func _flap_n(i: int) -> Vector2:
-	return _flap_n0(i).rotated(tilt[i])
-
+## --- Лист и сложенная бумага: рисование модели ------------------------------------------------
 
 ## Лист в координатах бумаги: правый конец ровный, левый (линия реза) может быть косым.
 func _sheet_poly() -> PackedVector2Array:
 	var sl := maxf(sheet_len, 1.0)
 	var y := _across() * 0.5 + MARGIN
 	return PackedVector2Array([Vector2(-sl * 0.5 - cut_skew * 0.5, -y), Vector2(sl * 0.5, -y), Vector2(sl * 0.5, y), Vector2(-sl * 0.5 + cut_skew * 0.5, y)])
-
-
-func _half_plane(pv: Vector2, d: Vector2, n: Vector2, outer: bool) -> PackedVector2Array:
-	var big := 3000.0
-	var nn := n if outer else -n
-	return PackedVector2Array([pv - d * big, pv + d * big, pv + d * big + nn * big, pv - d * big + nn * big])
-
-
-func _poly_area(poly: PackedVector2Array) -> float:
-	var a := 0.0
-	for i in poly.size():
-		var p := poly[i]
-		var q := poly[(i + 1) % poly.size()]
-		a += p.x * q.y - q.x * p.y
-	return absf(a) * 0.5
-
-
-## Лист делится по линиям сгиба: клапаны отщепляются в порядке складывания, остаток — основа.
-## Возвращает {order, flaps: {i: [полигоны]}, base: [полигоны]}.
-func _split_sheet() -> Dictionary:
-	var order: Array = fold_order.duplicate()
-	for i in 4:
-		if not order.has(i):
-			order.append(i)
-	var remaining: Array = [_sheet_poly()]
-	var flaps := {}
-	for idx in order:
-		var i: int = idx
-		var pv := _flap_pivot(i)
-		var d := _flap_d(i)
-		var n := _flap_n(i)
-		var outer := _half_plane(pv, d, n, true)
-		var inner := _half_plane(pv, d, n, false)
-		var fl: Array = []
-		var rem2: Array = []
-		for poly in remaining:
-			for pp in Geometry2D.intersect_polygons(poly, outer):
-				fl.append(pp)
-			for pp2 in Geometry2D.intersect_polygons(poly, inner):
-				rem2.append(pp2)
-		flaps[i] = fl
-		remaining = rem2
-	return {"order": order, "flaps": flaps, "base": remaining}
-
-
-## Клапан приподнят на угол th: точки раскладываются вдоль линии сгиба и сжимаются поперёк (th = PI — лежит плоско, 0 — сложен).
-func _proj_poly(poly: PackedVector2Array, i: int, th: float) -> PackedVector2Array:
-	var pv := _flap_pivot(i)
-	var d := _flap_d(i)
-	var n := _flap_n(i)
-	var k := -cos(th)
-	var out := PackedVector2Array()
-	for p in poly:
-		var r := p - pv
-		out.append(pv + d * r.dot(d) + n * (r.dot(n) * k))
-	return out
 
 
 func _poly_bounds(poly: PackedVector2Array) -> Rect2:
@@ -1975,13 +2075,6 @@ func _poly_bounds(poly: PackedVector2Array) -> Rect2:
 	return r
 
 
-func _draw_poly_print(poly: PackedVector2Array, paper: Dictionary, clip: PackedVector2Array) -> void:
-	var r := _poly_bounds(poly)
-	if r.size.x < 0.5 or r.size.y < 0.5:
-		return
-	_draw_print(r, paper, r.position.x, 1.0, clip)
-
-
 func _shadow_poly(poly: PackedVector2Array, off: Vector2, alpha: float) -> void:
 	var o := PackedVector2Array()
 	for p in poly:
@@ -1989,96 +2082,236 @@ func _shadow_poly(poly: PackedVector2Array, off: Vector2, alpha: float) -> void:
 	draw_colored_polygon(o, Color(0, 0, 0, alpha))
 
 
-## Основа и клапаны, лежащие плашмя или приподнятые меньше чем до прямого угла (они под вещью).
-func _draw_poly_back(paper: Dictionary, clip_p: PackedVector2Array) -> void:
-	var sp := _split_sheet()
-	var shape_tuck := clip_p.size() >= 3
-	for poly in sp["base"]:
-		if _poly_area(poly) < 4.0:
-			continue
-		if shape_tuck:
-			_draw_poly_print(poly, paper, clip_p)
+## Преобразование координат бумаги в экранные.
+func _paper_base_xf() -> Transform2D:
+	var s := maxf(gift_scale, 0.001)
+	var off := Vector2(paper_shift, 0.0).rotated(rot) * s
+	return Transform2D(rot, CENTER + gift_off + off).scaled_local(Vector2(s, s))
+
+
+## Куски бумаги, как они выглядят сейчас: под рукой, в доводке или уже лежащие.
+func _current_pieces() -> Array:
+	if fold_drag and fold_cur.get("valid", false):
+		return fold.preview(fold_cur["n"], float(fold_cur["c"]), float(fold_cur["phi"]))
+	if not fold_anim.is_empty():
+		return fold.preview(fold_anim["n"], float(fold_anim["c"]), float(fold_anim["phi"]))
+	return fold.pieces()
+
+
+func _back_color(paper: Dictionary) -> Color:
+	return Color.html(str(paper["base"])).lerp(Color(0.97, 0.95, 0.9), 0.72)
+
+
+## Куски слоя 0 рисуются под вещью, все сложенные (слой 1 и выше) над ней по возрастанию слоя.
+func _draw_pieces(paper: Dictionary, pieces: Array, upper: bool) -> void:
+	var list: Array = []
+	for pc in pieces:
+		if (int(pc["layer"]) >= 1) == upper:
+			list.append(pc)
+	list.sort_custom(func(a, b): return int(a["layer"]) < int(b["layer"]))
+	for pc in list:
+		_draw_piece(paper, pc)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_piece(paper: Dictionary, pc: Dictionary) -> void:
+	var xf: Transform2D = pc["xf"]
+	var flat: PackedVector2Array = pc["flat"]
+	var det := xf.determinant()
+	if absf(det) < 0.03:
+		return   # бумага стоит ребром
+	var layer := int(pc["layer"])
+	var moving: bool = pc.get("moving", false)
+	var phi := float(pc.get("phi", 0.0))
+	if moving and mesh_enabled and pc.has("xf0"):
+		_draw_piece_mesh(paper, pc)
+		return
+	var cur := xf * flat
+	var base_xf := _paper_base_xf()
+	draw_set_transform_matrix(base_xf)
+	if moving:
+		_shadow_poly(cur, Vector2(3, 5) * (1.0 + 1.8 * sin(phi)), 0.14 + 0.12 * sin(phi))
+	elif layer >= 1:
+		_shadow_poly(cur, Vector2(3, 5), 0.16)
+	else:
+		_shadow_poly(cur, Vector2(5, 7), 0.22)
+	draw_set_transform_matrix(base_xf * xf)
+	var r := _poly_bounds(flat)
+	if r.size.x >= 0.5 and r.size.y >= 0.5:
+		_draw_print(r, paper, r.position.x, 1.0, flat)
+	if det < 0.0:
+		draw_colored_polygon(flat, Color(1, 1, 1, 0.13))   # обратная сторона листа чуть светлее
+	if moving:
+		draw_colored_polygon(flat, Color(0, 0, 0, 0.10 * sin(phi)))
+	# faint crease lines stay on folded pieces
+	var grown := Geometry2D.offset_polygon(flat, 1.5, Geometry2D.JOIN_MITER)
+	if grown.size() > 0:
+		for cr in pc["creases"]:
+			var seg: Array = cr
+			for part in Geometry2D.intersect_polyline_with_polygon(PackedVector2Array([seg[0], seg[1]]), grown[0]):
+				if part.size() >= 2:
+					draw_line(part[0], part[part.size() - 1], Color(1, 1, 1, 0.22), 2.0)
+	draw_set_transform_matrix(base_xf)
+	if moving:
+		_crease_band(cur, pc["n"], float(pc["c"]), phi)
+	U.stroke(self, cur, U.INK, 3.0, time, 0.0)
+
+
+## Кусок в движении как сетка частиц: бумага изгибается по дуге у сгиба (радиус CURL_R, у ровного и сложенного положения
+## радиус нулевой), частицы тянутся к цели пружиной, свет и затемнение у сгиба считаются по высоте.
+func _draw_piece_mesh(paper: Dictionary, pc: Dictionary) -> void:
+	var t0 := Time.get_ticks_usec()
+	var flat: PackedVector2Array = pc["flat"]
+	var xf0: Transform2D = pc["xf0"]
+	var xf: Transform2D = pc["xf"]
+	var n: Vector2 = pc["n"]
+	var c := float(pc["c"])
+	var phi := float(pc["phi"])
+	var m: Dictionary = pmesh.mesh_for(flat)
+	var pts: PackedVector2Array = m["pts"]
+	var cnt := pts.size()
+	var targets := PackedVector2Array()
+	var tz := PackedFloat32Array()
+	var ao := PackedFloat32Array()
+	targets.resize(cnt)
+	tz.resize(cnt)
+	ao.resize(cnt)
+	var r := CURL_R * sin(phi)
+	var cs := cos(phi)
+	var sn := sin(phi)
+	var arc := r * phi
+	for i in cnt:
+		var p0 := xf0 * pts[i]
+		var sd := maxf(n.dot(p0) - c, 0.0)
+		var pn := 0.0
+		var hz := 0.0
+		if r > 0.5 and sd <= arc:
+			var th := sd / r
+			pn = r * sin(th)
+			hz = r * (1.0 - cos(th))
 		else:
-			_shadow_poly(poly, Vector2(5, 7), 0.22)
-			_draw_poly_print(poly, paper, poly)
-	for idx in sp["order"]:
-		var i: int = idx
-		var th := theta[i]
-		if cos(th) >= 0.0:
-			continue
-		var shade := lerpf(0.78, 1.0, clampf((th - PI * 0.5) / (PI * 0.5), 0.0, 1.0))
-		for poly in sp["flaps"][i]:
-			var pp := _proj_poly(poly, i, th)
-			if _poly_area(pp) < 4.0:
-				continue
-			_shadow_poly(pp, Vector2(4, 6), 0.18)
-			_draw_poly_print(pp, paper, pp)
-			draw_colored_polygon(pp, Color(0, 0, 0, 1.0 - shade))
-			U.stroke(self, pp, U.INK, 3.0, time, 1.0)
+			pn = r * sn + (sd - arc) * cs
+			hz = r * (1.0 - cs) + (sd - arc) * sn
+		targets[i] = p0 - n * sd + n * pn
+		tz[i] = hz
+		ao[i] = 0.30 * sn * exp(-sd / 14.0)
+	var stiff := MESH_STIFF * (5.0 if pc.has("xf0") and fold_anim.has("settle") else 1.0)
+	var st: Dictionary = pmesh.step(hash(flat), targets, tz, last_delta, stiff, MESH_DAMP)
+	var pos: PackedVector2Array = st["pos"]
+	var base := Color.html(str(paper["base"]))
+	if xf.determinant() < 0.0:
+		base = base.lerp(Color(1, 1, 1), 0.13)
+	var colors := PaperMesh.shade(pos, st["z"], m["tris"], base, ao)
+	var base_xf := _paper_base_xf()
+	draw_set_transform_matrix(base_xf)
+	var nb := int(m["nb"])
+	var bound := PackedVector2Array()
+	for i in nb:
+		bound.append(pos[i])
+	# мягкая тень под поднятым куском: те же треугольники, сдвинутые вниз и вправо
+	var soff := Vector2(3, 5) * (1.0 + 1.8 * sn)
+	var spos := PackedVector2Array()
+	spos.resize(cnt)
+	var scol := PackedColorArray()
+	scol.resize(cnt)
+	var sa := 0.14 + 0.12 * sn
+	for i in cnt:
+		spos[i] = pos[i] + soff
+		scol[i] = Color(0, 0, 0, sa)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), m["tris"], spos, scol)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), m["tris"], pos, colors)
+	var ring := bound.duplicate()
+	ring.append(bound[0])
+	draw_polyline(ring, U.INK, 3.0, true)
+	mesh_particles = pmesh.particle_count()
+	mesh_ms = lerpf(mesh_ms, float(Time.get_ticks_usec() - t0) / 1000.0, 0.1)
+	# бюджет кадра: если частицы дороже ~3.5 мс (например, в веб-сборке), сетка становится грубее
+	if mesh_ms > 3.5 and pmesh.cell < 24.0:
+		pmesh.cell *= 1.25
+		pmesh.meshes = {}
+		pmesh.clear_states()
 
 
-## Клапаны, поднятые выше прямого угла или сложенные: лежат поверх вещи.
-func _draw_poly_front(paper: Dictionary, clip_p: PackedVector2Array) -> void:
-	var sp := _split_sheet()
-	var shape_tuck := clip_p.size() >= 3
-	for idx in sp["order"]:
-		var i: int = idx
-		var th := theta[i]
-		var ct := cos(th)
-		if ct < 0.0:
-			continue
-		for poly in sp["flaps"][i]:
-			var pp := _proj_poly(poly, i, th)
-			if _poly_area(pp) < 4.0:
-				continue
-			if shape_tuck:
-				_draw_poly_print(pp, paper, clip_p)
-			else:
-				_draw_poly_print(pp, paper, pp)
-				draw_colored_polygon(pp, Color(0, 0, 0, 0.10 + 0.20 * (1.0 - ct)))
-				U.stroke(self, pp, U.INK, 3.0, time, 1.0)
+## Мягкая тень вдоль линии сгиба на поднятом куске, сильнее всего посередине сгибания.
+func _crease_band(cur: PackedVector2Array, n: Vector2, c: float, phi: float) -> void:
+	var d := Vector2(-n.y, n.x)
+	var inward := 1.0 if cos(phi) >= 0.0 else -1.0
+	var p0 := n * c
+	for k in 2:
+		var w0 := 16.0 * float(k) * inward
+		var w1 := 16.0 * float(k + 1) * inward
+		var strip := PackedVector2Array([p0 - d * 3000.0 + n * w0, p0 + d * 3000.0 + n * w0, p0 + d * 3000.0 + n * w1, p0 - d * 3000.0 + n * w1])
+		for q in Geometry2D.intersect_polygons(cur, strip):
+			if Fold.area(q) >= 2.0:
+				draw_colored_polygon(q, Color(0, 0, 0, 0.22 * sin(phi) * (1.0 - 0.5 * float(k))))
 
 
-## Где сейчас есть бумага (скотч и лента ложатся только на неё): основа плюс все клапаны, как они лежат, плюс допуск.
+## Готовый свёрток по форме вещи: бумага плотно обтягивает силуэт.
+func _draw_sack(paper: Dictionary) -> void:
+	var clip_p := _clip_to_paper(clip_cur)
+	if clip_p.size() < 3:
+		return
+	_set_paper_transform()
+	var r := _poly_bounds(clip_p)
+	_draw_print(r, paper, r.position.x, 1.0, clip_p)
+	U.stroke(self, clip_p, U.INK, 4.0, time, 1.2)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Где сейчас есть бумага (скотч и лента ложатся только на неё): сложенные куски плюс не сложенная бумага вне вещи, с допуском.
 func _paper_footprint() -> PackedVector2Array:
-	var sp := _split_sheet()
 	var polys: Array = []
-	for poly in sp["base"]:
-		polys.append(poly)
-	for idx in sp["order"]:
-		var i: int = idx
-		var th := 0.0 if folded[i] else theta[i]
-		for poly in sp["flaps"][i]:
-			polys.append(_proj_poly(poly, i, th))
-	var parts: Array = []
-	for p in polys:
-		if _poly_area(p) < 4.0:
-			continue
-		var cur: PackedVector2Array = p
-		var rest: Array = []
-		for q in parts:
-			var m := Geometry2D.merge_polygons(cur, q)
-			if m.size() == 1:
-				cur = m[0]
+	if fold != null:
+		for f in fold.facets:
+			var p := Fold.poly(f)
+			if int(f["layer"]) >= 1:
+				polys.append(p)
 			else:
-				rest.append(q)
-		rest.append(cur)
-		parts = rest
+				for q in Geometry2D.clip_polygons(p, gift_hull):
+					polys.append(q)
+	var parts := Fold.union_polys(polys)
 	var best := PackedVector2Array()
 	var best_a := -1.0
 	for q2 in parts:
-		var a := _poly_area(q2)
+		var a := Fold.area(q2)
 		if a > best_a:
 			best_a = a
 			best = q2
 	if best.size() < 3:
-		best = _sheet_poly()
+		best = gift_hull if gift_hull.size() >= 3 else _sheet_poly()
 	var offs := Geometry2D.offset_polygon(best, STROKE_TOL, Geometry2D.JOIN_ROUND)
 	var src: PackedVector2Array = offs[0] if offs.size() > 0 else best
 	var out := PackedVector2Array()
 	for p3 in src:
 		out.append(p3.rotated(rot))
 	return out
+
+
+## Подсказки: стрелки на не сложенных кусках бумаги, торчащих из-под вещи.
+func _draw_fold_hints() -> void:
+	if fold == null or fold_drag or not fold_anim.is_empty() or tucked or active_tool != "":
+		return
+	var pulse := 0.5 + 0.5 * sin(time * 4.0)
+	var acol := Color(1, 0.95, 0.7, 0.35 + 0.4 * pulse)
+	var hc := Vector2.ZERO
+	for v in gift_hull:
+		hc += v
+	hc /= float(maxi(gift_hull.size(), 1))
+	for f in fold.facets:
+		if int(f["layer"]) != 0:
+			continue
+		var p := Fold.poly(f)
+		if Fold.area(p) < 700.0:
+			continue
+		var c := Vector2.ZERO
+		for v in p:
+			c += v
+		c /= float(p.size())
+		if Geometry2D.is_point_in_polygon(c, gift_hull):
+			continue
+		var d := (hc - c).normalized()
+		var perp := Vector2(-d.y, d.x)
+		draw_colored_polygon(PackedVector2Array([c + d * 16.0, c - d * 8.0 + perp * 12.0, c - d * 8.0 - perp * 12.0]), acol)
 
 
 ## Вид во время вытяжки: лист по центру подарка, свободный конец идёт за курсором,
@@ -2140,26 +2373,12 @@ func _draw_gift() -> void:
 	if item.is_empty() or step == Step.CHOOSE:
 		return
 	var shape_mode := wrap_mode == "shape"
-	var iw := _along()
-	var ih := _across()
-	var hw := iw * 0.5
-	var hh := ih * 0.5
+	var hh := _across() * 0.5
 	var ir := Rect2(-item_w * 0.5, -item_h * 0.5, item_w, item_h)
 	var fh := _flap_len()
-	var fv := MARGIN
 	var paper: Dictionary = {}
 	if paper_idx >= 0:
 		paper = Data.PAPERS[paper_idx]
-	var pbase := Color.html(paper["base"]) if not paper.is_empty() else Color.WHITE
-	var clip := clip_cur
-	var clip_p := _clip_to_paper(clip_cur)
-	var lean: Array[float] = []
-	for i in 4:
-		lean.append(maxf(-cos(theta[i]), 0.0))
-	var mt := fv * lean[2]
-	var mb := fv * lean[3]
-	var bw := minf(sheet_len, iw)
-	var poly_mode := _use_poly()
 
 	if step == Step.PULL and not paper.is_empty():
 		_draw_pull_view(paper, ir)
@@ -2168,45 +2387,12 @@ func _draw_gift() -> void:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return
 
-	# 1. основа листа и клапаны, ещё лежащие вбок (всё в системе координат бумаги)
-	_set_paper_transform()
-	if not paper.is_empty() and poly_mode:
-		_draw_poly_back(paper, clip_p)
-	elif not paper.is_empty():
-		var base_r := Rect2(-bw * 0.5, -hh, bw, ih)
-		if clip_p.size() < 3:
-			draw_rect(Rect2(base_r.position + Vector2(5, 7), base_r.size), Color(0, 0, 0, 0.22))
-		_draw_print(base_r, paper, base_r.position.x, 1.0, clip_p)
-		for i in 2:
-			var sgn := -1.0 if i == 0 else 1.0
-			var hinge := sgn * hw
-			var ct := cos(theta[i])
-			if fh > 0.0 and ct < 0.0:
-				var xe := hinge - sgn * fh * ct
-				var xa := minf(hinge, xe)
-				var xb := maxf(hinge, xe)
-				var shade := lerpf(0.78, 1.0, clampf((theta[i] - PI * 0.5) / (PI * 0.5), 0.0, 1.0))
-				var lr := Rect2(xa, -hh - mt, xb - xa, ih + mt + mb)
-				draw_rect(Rect2(lr.position + Vector2(4, 6), lr.size), Color(0, 0, 0, 0.18))
-				_draw_print(lr, paper, -bw * 0.5, 1.0, PackedVector2Array())
-				draw_rect(lr, Color(0, 0, 0, 1.0 - shade))
-				_rect_stroke(lr, 3.0)
-		for i in range(2, 4):
-			var sgv := -1.0 if i == 2 else 1.0
-			var hinge_y := sgv * hh
-			var ctv := cos(theta[i])
-			if ctv < 0.0:
-				var ye := hinge_y - sgv * fv * ctv
-				var ya := minf(hinge_y, ye)
-				var yb := maxf(hinge_y, ye)
-				var half := bw * 0.5
-				var xl := -half - fh * lean[0]
-				var xr := half + fh * lean[1]
-				var shade_v := lerpf(0.78, 1.0, clampf((theta[i] - PI * 0.5) / (PI * 0.5), 0.0, 1.0))
-				var vr := Rect2(xl, ya, xr - xl, yb - ya)
-				_draw_print(vr, paper, xl, 1.0, PackedVector2Array())
-				draw_rect(vr, Color(0, 0, 0, 1.0 - shade_v))
-				_rect_stroke(vr, 3.0)
+	var have_fold: bool = not paper.is_empty() and fold != null and not fold.is_empty()
+	var sack: bool = have_fold and tucked and shape_mode and clip_cur.size() >= 3
+	var pieces: Array = _current_pieces() if have_fold else []
+	# 1. не сложенная бумага (слой 0) лежит под вещью
+	if have_fold and not sack:
+		_draw_pieces(paper, pieces, false)
 
 	# 2. сама вещь или коробка и собранный хвост (в системе координат стола)
 	_set_gift_transform()
@@ -2214,62 +2400,12 @@ func _draw_gift() -> void:
 	if shape_mode and tail_t > 0.0 and not paper.is_empty() and item.has("tail"):
 		_draw_tail(paper)
 
-	# 3. клапаны поверх вещи (виден рисунок бумаги)
-	_set_paper_transform()
-	if not paper.is_empty() and poly_mode:
-		_draw_poly_front(paper, clip_p)
-	elif not paper.is_empty():
-		if fh > 0.0:
-			var order: Array = fold_order.duplicate()
-			for i in 2:
-				if not order.has(i):
-					order.append(i)
-			for idx in order:
-				var i2: int = idx
-				if i2 > 1:
-					continue
-				var sgn2 := -1.0 if i2 == 0 else 1.0
-				var hinge2 := sgn2 * hw
-				var ct2 := cos(theta[i2])
-				if ct2 < 0.0:
-					continue
-				var xe2 := hinge2 - sgn2 * fh * ct2
-				var xa2 := minf(hinge2, xe2)
-				var xb2 := maxf(hinge2, xe2)
-				if xb2 - xa2 < 0.5:
-					continue
-				var cr := Rect2(xa2, -hh - mt, xb2 - xa2, ih + mt + mb)
-				if clip_p.size() < 3:
-					var shx := xe2 if sgn2 < 0.0 else xe2 - 6.0
-					draw_rect(Rect2(shx, cr.position.y + 4.0, 6.0, cr.size.y), Color(0, 0, 0, 0.2))
-				_draw_print(cr, paper, hinge2, -sgn2, clip_p)
-				if clip_p.size() < 3:
-					draw_rect(cr, Color(0, 0, 0, 0.22 * (1.0 - ct2)))
-					draw_line(Vector2(xe2, cr.position.y), Vector2(xe2, cr.end.y), Color(1, 1, 1, 0.35), 2.0)
-					_rect_stroke(cr, 3.0)
-		for i in range(2, 4):
-			var sgv2 := -1.0 if i == 2 else 1.0
-			var hinge_y2 := sgv2 * hh
-			var ctv2 := cos(theta[i])
-			if ctv2 < 0.0 or fv * ctv2 < 0.5:
-				continue
-			var ye2 := hinge_y2 - sgv2 * fv * ctv2
-			var ya2 := minf(hinge_y2, ye2)
-			var yb2 := maxf(hinge_y2, ye2)
-			var er := Rect2(-bw * 0.5, ya2, bw, yb2 - ya2)   # длина как у листа: короткий лист короче подарка
-			_draw_print(er, paper, er.position.x, 1.0, clip_p)
-			if clip_p.size() < 3:
-				draw_rect(er, Color(0, 0, 0, 0.16 + 0.16 * (1.0 - ctv2)))
-				draw_line(Vector2(er.position.x, ye2), Vector2(er.end.x, ye2), Color(1, 1, 1, 0.3), 2.0)
-				_rect_stroke(er, 3.0)
-
-	# 4. общий контур готового свёртка
-	if tucked and not paper.is_empty():
-		if shape_mode and clip.size() >= 3:
-			_set_gift_transform()
-			U.stroke(self, clip, U.INK, 4.0, time, 1.2)
-		elif not shape_mode:
-			_rect_stroke(Rect2(-hw, -hh, iw, ih), 4.0)
+	# 3. сложенная бумага всегда поверх вещи и поверх более ранних сгибов
+	if have_fold:
+		if sack:
+			_draw_sack(paper)
+		else:
+			_draw_pieces(paper, pieces, true)
 
 	# 5. скотч, лента, бант (в системе координат стола, рисует игрок)
 	_set_gift_transform()
@@ -2325,24 +2461,5 @@ func _draw_gift_hints(hh: float, f: float) -> void:
 		draw_arc(hp, 15.0, 0.0, TAU, 24, col, 2.0)
 		draw_colored_polygon(PackedVector2Array([hp + Vector2(-9, 0), hp + Vector2(-3, -5), hp + Vector2(-3, 5)]), col)
 		draw_colored_polygon(PackedVector2Array([hp + Vector2(9, 0), hp + Vector2(3, -5), hp + Vector2(3, 5)]), col)
-	elif step == Step.WRAP and active_tool == "" and flap_drag < 0 and not tucked:
-		var hw := _along() * 0.5
-		var acol := Color(1, 0.95, 0.7, 0.35 + 0.4 * pulse)
-		for i in 2:
-			if folded[i] or f < 1.0:
-				continue
-			var sgn := -1.0 if i == 0 else 1.0
-			var xm := sgn * hw + sgn * f * 0.5
-			var d := -sgn
-			var tip := xm + d * 16.0
-			var bs := xm - d * 8.0
-			draw_colored_polygon(PackedVector2Array([Vector2(tip, 0), Vector2(bs, -12), Vector2(bs, 12)]), acol)
-		for i in range(2, 4):
-			if folded[i]:
-				continue
-			var sgv := -1.0 if i == 2 else 1.0
-			var ym := sgv * hh + sgv * MARGIN * 0.5
-			var dv := -sgv
-			var tipv := ym + dv * 14.0
-			var bsv := ym - dv * 6.0
-			draw_colored_polygon(PackedVector2Array([Vector2(0, tipv), Vector2(-12, bsv), Vector2(12, bsv)]), acol)
+	elif step == Step.WRAP:
+		_draw_fold_hints()

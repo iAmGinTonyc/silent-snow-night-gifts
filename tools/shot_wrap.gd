@@ -1,6 +1,7 @@
 extends SceneTree
-## Скриншоты экрана упаковки по шагам (в окне, не headless): godot --path . --script res://tools/shot_wrap.gd
-## Кадры падают в build/shots/. Нужен, потому что превью в панели иногда тормозит до одного кадра в секунду.
+## Скриншоты экрана упаковки по шагам (в окне, не headless): godot --path . --script res://tools/shot_wrap.gd -- <сценарий>
+## Сценарии: box_h, shape_h, box_v, shape_v (четыре прямых сгиба, потом откат), diag_box_h, diag_shape_h (угол по диагонали).
+## Кадры падают в build/shots/. Каждый сценарий запускайте отдельным процессом: окно за другими перестаёт перерисовываться.
 
 var main
 var OUT := ProjectSettings.globalize_path("res://build/shots/")
@@ -8,6 +9,8 @@ var OUT := ProjectSettings.globalize_path("res://build/shots/")
 
 func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(OUT)
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP, true)
+	DisplayServer.window_move_to_foreground()
 	var packed: PackedScene = load("res://scenes/main.tscn")
 	main = packed.instantiate()
 	root.add_child(main)
@@ -30,72 +33,79 @@ func shot(name: String) -> void:
 	print("shot ", name)
 
 
+func pt(w, p: Vector2) -> Vector2:
+	return w.CENTER + p.rotated(w.rot)
+
+
+func idle(w) -> void:
+	await wait_until(func(): return not w.fold_busy(), 8.0)
+	await create_timer(0.3).timeout
+
+
+## Рука берёт бумагу в a и ведёт к b (координаты бумаги); на половине пути, если задан tag, снимается кадр.
+func drag(w, a: Vector2, b: Vector2, tag: String = "") -> void:
+	w.fold_drag_begin(pt(w, a))
+	if not w.fold_drag:
+		print("not grabbed at ", a)
+	for k in range(1, 9):
+		w.fold_drag_move(pt(w, a.lerp(b, float(k) / 8.0)))
+		await process_frame
+		if tag != "" and (k == 3 or k == 5):
+			await shot(tag + "_k" + str(k))
+		if tag != "" and k == 4:
+			await shot(tag)
+			print("   mesh: particles=", w.mesh_particles, " ms/frame=", snappedf(w.mesh_ms, 0.001))
+	w.fold_drag_end()
+	await idle(w)
+
+
+func scenario(which: String) -> void:
+	var w = main.wrap
+	var use_box := which.contains("box")
+	var vertical := which.ends_with("_v")
+	await wait_until(func(): return w.step == w.Step.CHOOSE and main.screen == "wrap", 60.0)
+	await create_timer(2.0).timeout
+	w._choose_card(0 if use_box else w.cards.size() - 1)
+	await create_timer(0.6).timeout
+	w._select_paper(1)
+	if vertical:
+		w._set_axis("v")
+	w.pull_len = clampf(w._l_min() + 70.0, w._pull_min(), w._pull_max())
+	w.sheet_len = w.pull_len
+	w.pull_moved = true
+	w._do_cut(pt(w, Vector2(-w.pull_len * 0.5 + 1.0, 0.0)))
+	await create_timer(1.5).timeout
+	var hw: float = w._along() * 0.5
+	var hh: float = w._across() * 0.5
+	var fh: float = w._flap_len()
+	await shot(which + "_0_cut")
+	if which.begins_with("diag"):
+		var ys: float = hh + w.MARGIN
+		var corner: Vector2 = w._sheet_poly()[0] + Vector2(16.0, 16.0)
+		await drag(w, corner, Vector2(-hw * 0.2, -hh * 0.2), which + "_1_diag_partial")
+		await shot(which + "_2_diag_done")
+	await drag(w, Vector2(-hw - fh * 0.8, 0.0), Vector2(10.0, 0.0), which + "_3_left_partial")
+	await shot(which + "_4_left")
+	await drag(w, Vector2(hw + fh * 0.8, 0.0), Vector2(-10.0, 0.0))
+	await shot(which + "_5_right")
+	await drag(w, Vector2(0.0, -hh - 22.0), Vector2(0.0, 10.0))
+	await shot(which + "_6_top")
+	await drag(w, Vector2(0.0, hh + 22.0), Vector2(0.0, -10.0))
+	await create_timer(1.3).timeout
+	await shot(which + "_7_done")
+	print(which, " folds=", w.fold.fold_count(), " cover=", w.fold.coverage(w.gift_hull), " tucked=", w.tucked)
+	w.fold_undo()
+	await idle(w)
+	await shot(which + "_8_undo")
+
+
 func run() -> void:
 	await process_frame
 	main.auto_play = true
 	main.hud.start_root.visible = false
 	main._start_game()
 	await wait_until(func(): return main.customer.state == "idle" and main.order.offer_enabled, 90.0)
-	await shot("w0_order")
 	main._on_offer(str(main.current["ideal"]))
-	var w = main.wrap
-	await wait_until(func(): return w.step == w.Step.CHOOSE or w.step == w.Step.PAPER, 60.0)
-	if w.step == w.Step.CHOOSE:
-		w._choose_card(w.cards.size() - 1)
-	await create_timer(0.8).timeout
-	w._select_paper(1)
-	w.pull_len = w._pull_min() + 150.0
-	w.sheet_len = w.pull_len
-	w.pull_moved = true
-	w.hover = "spool:1"
-	w.mouse_pos = w._spool_pos(1)
-	await shot("w1_pull_tooltip")
-	w.hover = "ruler"
-	await shot("w1b_ruler_tooltip")
-	w.hover = ""
-	w._select_tool("ruler")
-	w.ruler_a = w.CENTER + Vector2(-110, -80)
-	w.ruler_b = w.CENTER + Vector2(-70, 80)
-	w._set_cut_mark()
-	w._select_tool("scissors")
-	await shot("w2_mark")
-	w._do_cut_line(-w.pull_len * 0.5 + 30.0, -w.pull_len * 0.5 + 80.0, 4.0)
-	await create_timer(1.0).timeout
-	await shot("w3_cut")
-	var hw: float = w._along() * 0.5
-	var fh: float = w._flap_len()
-	w._begin_flap_drag(w.CENTER + Vector2(-hw - fh * 0.7, 0.0))
-	w._update_flap_drag(w.CENTER + Vector2(-hw + fh * 0.4, 46.0))
-	await shot("w4_tilt_drag")
-	w._end_flap_drag()
-	var hh: float = w._across() * 0.5
-	var starts: Array = [Vector2(hw + fh * 0.8, 0.0), Vector2(0.0, -hh - 22.0), Vector2(0.0, hh + 22.0)]
-	var ends: Array = [Vector2(-10.0, 0.0), Vector2(0.0, 10.0), Vector2(0.0, -10.0)]
-	for i in 3:
-		w._begin_flap_drag(w.CENTER + starts[i])
-		w._update_flap_drag(w.CENTER + ends[i])
-		w._end_flap_drag()
-	await wait_until(func(): return w.tucked, 10.0)
-	await create_timer(1.2).timeout
-	await shot("w5_tucked")
-	w._select_tool("tape")
-	w._begin_stroke(w.CENTER + Vector2(-30.0, -10.0))
-	for k in 8:
-		w._move_stroke(w.CENTER + Vector2(-30.0 + float(k) * 8.0, -10.0 + float(k) * 3.0))
-	w._end_stroke()
-	w._select_tool("tape")
-	w._select_ribbon_tool(2)
-	w._ribbon_press(w.CENTER + Vector2(-hw - 2.0, 4.0))
-	w.mouse_pos = w.CENTER + Vector2(hw + 2.0, 4.0)
-	await create_timer(0.5).timeout
-	await shot("w6_ribbon_preview")
-	w._ribbon_press(w.CENTER + Vector2(hw + 2.0, 4.0))
-	w._ribbon_press(w.CENTER + Vector2(4.0, -hh - 2.0))
-	w.mouse_pos = w.CENTER + Vector2(4.0, hh + 2.0)
-	w.ribbon_end_vis = w.CENTER + Vector2(4.0, hh) - w.CENTER
-	await shot("w7_ribbon_anchored")
-	w._ribbon_press(w.CENTER + Vector2(4.0, hh + 2.0))
-	w.active_tool = ""
-	await create_timer(0.8).timeout
-	await shot("w8_done")
+	var args := OS.get_cmdline_user_args()
+	await scenario(str(args[0]) if args.size() > 0 else "box_h")
 	quit()

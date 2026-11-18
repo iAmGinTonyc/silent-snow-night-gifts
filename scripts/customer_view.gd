@@ -18,6 +18,10 @@ const FEET_Y := 337.0
 const SPRITE_IDS := {
 	"Mrs. Tanaka": "tanaka", "Mateo": "mateo", "Ingrid": "ingrid",
 	"Mr. Okafor": "okafor", "Granny Zeynep": "zeynep", "Santa": "santa",
+	"Leo": "leo", "Pavel": "pavel", "Auntie Meena": "meena", "Dmitri": "dmitri", "Kwame": "kwame",
+	"Anh": "anh", "Father Christmas (sort of)": "fchristmas", "Aaliyah": "aaliyah",
+	"The Murphy family": "murphy", "Jin": "jin", "Mrs. Fernandez": "fernandez", "Sasha": "sasha",
+	"Mr. Al-Rashid": "alrashid", "Lucia": "lucia", "Dona Rosa from upstairs": "rosa",
 }
 const SPRITE_H := 224.0       # высота спрайта в единицах узла (узел ещё масштабируется)
 const SPRITE_BASE_Y := 350.0  # нижний срез спрайта прячется за прилавком
@@ -31,6 +35,7 @@ var sprite: Array = []        # 7 текстур или пусто
 var face := 2.0               # какой кадр сейчас показан (дробный, плавно идёт к цели)
 var reacted := false          # клиент уже отреагировал на результат
 var worry := 1.0              # доля оставшегося терпения 0..1
+var talking_left := 0.0       # пока говорит, лицо чередует закрытый и открытый рот
 var face_override := -1       # кадр лица задан извне (сцена с Сантой), -1 значит как обычно
 
 var data: Dictionary = {}
@@ -61,6 +66,7 @@ func arrive(c: Dictionary) -> void:
 	worry = 1.0
 	face = 2.0
 	face_override = -1
+	talking_left = 0.0
 	sprite = _load_sprite(str(c.get("name", "")))
 
 
@@ -94,9 +100,15 @@ func _load_sprite(cname: String) -> Array:
 
 
 ## Какой кадр лица нужен сейчас: после реакции по результату, иначе по оставшемуся терпению.
+func talk_for(sec: float) -> void:
+	talking_left = sec
+
+
 func _face_target() -> int:
 	if face_override >= 0:
 		return face_override
+	if talking_left > 0.0:
+		return 5 if fmod(time * 7.0, 1.0) < 0.5 else 4
 	if reacted:
 		if mood >= 2:
 			return 6
@@ -127,6 +139,7 @@ func reset() -> void:
 
 func _process(delta: float) -> void:
 	time += delta
+	talking_left = maxf(talking_left - delta, 0.0)
 	react_t += delta
 	sparkle_t += delta
 	blink_in -= delta

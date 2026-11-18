@@ -9,6 +9,15 @@ const INTRO := [
 	{"who": "", "text": "Self-employed elf. Sounds grand. Let's see what I have learned."},
 ]
 
+## Голос каждого клиента (неразборчивое бормотание по возрасту и полу): child, woman, man, young, elder_woman, elder_man.
+const VOICES := {
+	"Mrs. Tanaka": "elder_woman", "Mateo": "man", "Ingrid": "woman", "Leo": "child", "Pavel": "man",
+	"Mr. Okafor": "man", "Auntie Meena": "elder_woman", "Dmitri": "man", "Kwame": "man", "Anh": "woman",
+	"Father Christmas (sort of)": "elder_man", "Granny Zeynep": "elder_woman", "Aaliyah": "woman",
+	"The Murphy family": "man", "Jin": "young", "Mrs. Fernandez": "elder_woman", "Sasha": "young",
+	"Mr. Al-Rashid": "man", "Lucia": "woman", "Dona Rosa from upstairs": "elder_woman", "Santa": "elder_man",
+}
+
 ## Приветствия до мысли клиента (поле hello): первый гость объясняет, что лавка появилась из ниоткуда,
 ## дальше на это ссылаются другие. Показываются в облачке, по строке за раз.
 const HELLO := {

@@ -24,6 +24,13 @@ var reorder
 var inspect
 var auto_play := false      # автотест: без диалогов и экранов выбора, заказ и приёмка идут сами
 var current_bad := ""       # скрытый брак у игрушки, которую выбрал клиент: "", "bad" или "sub"
+var think_time := 20.0      # сколько секунд мысли клиента наполняются «водой», потом он говорит их вслух
+var thinking := false
+var think_t := 0.0
+var read_in_time := false   # подарок предложен до конца таймера мыслей: дополнительные чаевые
+var offer_made := false
+var complaints_today := 0   # сколько с нас снимут вечером за проданный брак
+var complaint_count := 0
 var tint
 var order_root
 var wrap_root
@@ -123,6 +130,11 @@ func _ready() -> void:
 	bg.sky_target = bg.sky_color
 	var clock: Array = ev["clock"]
 	bg.set_clock_instant(float(clock[0]))
+	# замер упаковки в браузере: index.html?bench=wrap (см. scripts/web_bench.gd)
+	if OS.has_feature("web") and str(JavaScriptBridge.eval("window.location.search", true)).contains("bench=wrap"):
+		var bench: Node = load("res://scripts/web_bench.gd").new()
+		add_child(bench)
+		bench.run(self)
 
 
 var _click_flag := false
@@ -166,6 +178,12 @@ func _sync_counter() -> void:
 
 func _process(delta: float) -> void:
 	_sync_counter()
+	if thinking and not patience_paused:
+		think_t += delta
+		order.set_thought_fill(think_t / think_time)
+		if think_t >= think_time:
+			thinking = false
+			_on_thoughts_spoken()
 	if not patience_on or patience_paused:
 		return
 	patience -= delta
@@ -289,6 +307,35 @@ func _on_customer_arrived() -> void:
 	hud.set_hint("Click the shelf on the right to pick a gift")
 	order.input_enabled = true
 	order.set_offer(true)
+	offer_made = false
+	read_in_time = false
+	thinking = true
+	think_t = 0.0
+	order.set_thought_fill(0.0)
+	# отсчёт обслуживания начнётся, когда клиент выскажет мысли вслух или когда мы предложим подарок
+	patience_on = false
+	status.show_patience(false)
+
+
+## Время мыслей вышло: клиент сам говорит их вслух (неразборчивым голосом по возрасту и полу), потом идёт отсчёт обслуживания.
+func _on_thoughts_spoken() -> void:
+	var e := epoch
+	order.set_thought_fill(0.0)
+	var text := str(current["thought"])
+	order.show_bubble(current["name"], text)
+	var secs: float = AudioSynth.babble_seconds(text.length())
+	if auto_play:
+		secs = 0.2
+	else:
+		AudioSynth.babble(str(Story.VOICES.get(str(current["name"]), "woman")), secs)
+		customer.talk_for(secs)
+	await get_tree().create_timer(secs + (0.2 if auto_play else 0.5)).timeout
+	if e != epoch or offer_made:
+		return
+	_start_service_timer()
+
+
+func _start_service_timer() -> void:
 	patience = patience_max
 	patience_on = true
 	status.show_patience(true)
@@ -306,6 +353,15 @@ func _on_offer(offered: String) -> void:
 	order.input_enabled = false
 	patience_paused = true
 	hud.set_hint("")
+	offer_made = true
+	read_in_time = thinking          # успели предложить, пока мысли ещё наполнялись
+	thinking = false
+	order.set_thought_fill(0.0)
+	AudioSynth.stop_babble()
+	customer.talk_for(0.0)
+	if not patience_on:
+		_start_service_timer()
+		patience_paused = true
 	current_match = "perfect" if guessed else "miss"
 	if guessed:
 		chosen_item = offered
@@ -352,6 +408,17 @@ func _on_offer(offered: String) -> void:
 		if e != epoch:
 			return
 	order.hide_bubble()
+	# подарок просто лежит на столе: упаковка начинается, когда мы на него нажмём
+	if not auto_play:
+		hud.set_hint("Click the gift to start wrapping")
+		order.input_enabled = true
+		order.set_gift_clickable(true)
+		await order.gift_clicked
+		if e != epoch:
+			return
+		hud.set_hint("")
+		order.input_enabled = false
+	order.take_item()
 	await _switch_to("wrap")
 	if e != epoch:
 		return
@@ -411,18 +478,6 @@ func _on_gift_ready(res: Dictionary) -> void:
 	var item_id: String = res["look"]["item_id"]
 	var neat: float = res["neat"]
 
-	# игрушка с браком, который мы пропустили при приёмке: клиент замечает поломку и ничего не платит
-	if current_bad != "":
-		customer.set_mood(0)
-		order.show_bubble(current["name"], "Wait... this toy is broken! I cannot take it, sorry.")
-		AudioSynth.play_sfx("dull")
-		await get_tree().create_timer(3.2).timeout
-		if e != epoch:
-			return
-		order.clear_gift()
-		await _customer_leaves(e)
-		return
-
 	# чем кривее подарок, тем выше шанс, что клиент расстроится
 	var outcome := "pay"
 	if neat < 0.7 and str(current.get("scene", "")) == "":
@@ -468,7 +523,11 @@ func _on_gift_ready(res: Dictionary) -> void:
 	var pay: int = int(it.get("sell", it["price"]))
 	econ.earn(pay)
 	status.set_money(econ.balance)
-	order.pay_pop()
+	order.pay_pop(pay)
+	# проданный брак: клиент придёт жаловаться уже после смены, вечером с нас снимут эти деньги
+	if current_bad != "":
+		complaints_today += pay
+		complaint_count += 1
 
 	var s := _evaluate(current, res)
 	if neat < 0.4:
@@ -497,6 +556,11 @@ func _on_gift_ready(res: Dictionary) -> void:
 		tips = 0
 	if neat < 0.4:
 		tips = 0
+	# мысли прочитаны вовремя, подарок и упаковка понравились: дополнительные чаевые
+	if read_in_time and current_match == "perfect" and s >= 0.5 and neat >= 0.4:
+		var bonus := 3 if s >= 0.75 else 2
+		tips += bonus
+		hud.show_toast("Mind read in time! Bonus tip +%d" % bonus)
 	if tips == 0:
 		line = current["meh"]
 		mood = mini(mood, 1)
@@ -583,6 +647,12 @@ func _evaluate(c: Dictionary, r: Dictionary) -> float:
 
 func _end_evening() -> void:
 	order.input_enabled = false
+	thinking = false
+	if complaints_today > 0:
+		econ.spend("complaint", complaints_today)
+		econ.ledger["complaint_n"] = complaint_count
+		complaints_today = 0
+		complaint_count = 0
 	var summary: Dictionary = econ.close_evening()
 	status.set_money(econ.balance)
 	hud.show_summary(summary, econ.balance, evening_idx + 1, Data.EVENINGS.size())
@@ -721,6 +791,11 @@ func _final() -> void:
 
 func _restart() -> void:
 	epoch += 1
+	thinking = false
+	offer_made = false
+	complaints_today = 0
+	complaint_count = 0
+	AudioSynth.stop_babble()
 	patience_on = false
 	evening_idx = 0
 	customer_idx = 0

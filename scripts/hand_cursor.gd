@@ -36,6 +36,7 @@ var shown := false
 var t := 0.0
 var snip_t := 1.0
 var was_pressed := false
+var pet_phase := 0.0       # накопленный путь мыши при поглаживании, по нему идут кадры
 var pose := "point"
 var frame := 0
 var ribbon_col := 0
@@ -54,12 +55,16 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		shown = true
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			pet_phase += (event as InputEventMouseMotion).relative.length() * 0.06
 
 
 func _process(delta: float) -> void:
 	t += delta
 	snip_t += delta
 	var pressed := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	if pressed and pose == "pet":
+		pet_phase += delta * 2.5   # лёгкое движение и без мыши, чтобы рука не замирала
 	pose = _pose_name()
 	if pressed and not was_pressed and pose == "scissors":
 		snip_t = 0.0
@@ -91,8 +96,10 @@ func _frame_for(p: String, pressed: bool) -> int:
 		"pinch":
 			return F_PINCH_PULL if pressed else F_PINCH
 		"pet":
-			var fps := 14.0 if pressed else 9.0
-			return F_PET + int(t * fps) % 6
+			# над котом рука спокойно лежит, гладит только пока кнопка нажата: кадры идут вслед за движением мыши
+			if not pressed:
+				return F_PET
+			return F_PET + int(pet_phase) % 6
 		"scissors":
 			if snip_t < 0.3:
 				return SNIP[mini(int(snip_t / 0.3 * float(SNIP.size())), SNIP.size() - 1)]

@@ -4,6 +4,7 @@ extends Node2D
 ## сверху четыре вывески-счётчика, внизу две плашки. Здесь же облачка речи и мыслей и подарок при выдаче.
 
 signal item_given
+signal gift_clicked
 signal offer_pressed(item_id: String)
 signal shelf_toggled(open: bool)
 
@@ -12,12 +13,18 @@ const U = preload("res://scripts/util.gd")
 const Shapes = preload("res://scripts/shapes.gd")
 
 const T_COUNTER := preload("res://art/shop/order_counter.png")
-const T_REGISTER := preload("res://art/shop/register.png")
-const T_JAR := preload("res://art/shop/jar.png")
+## Копилка: 16 картинок от пустой до переполненной, кадр выбирается по сумме денег (JAR_LEVELS).
+const T_JARS: Array[Texture2D] = [
+	preload("res://art/shop/jar_0.png"), preload("res://art/shop/jar_1.png"), preload("res://art/shop/jar_2.png"),
+	preload("res://art/shop/jar_3.png"), preload("res://art/shop/jar_4.png"), preload("res://art/shop/jar_5.png"),
+	preload("res://art/shop/jar_6.png"), preload("res://art/shop/jar_7.png"), preload("res://art/shop/jar_8.png"),
+	preload("res://art/shop/jar_9.png"), preload("res://art/shop/jar_10.png"), preload("res://art/shop/jar_11.png"),
+	preload("res://art/shop/jar_12.png"), preload("res://art/shop/jar_13.png"), preload("res://art/shop/jar_14.png"),
+	preload("res://art/shop/jar_15.png"),
+]
 const T_SHELF_VIEW := preload("res://art/shop/shelf_closeup.jpg")
 const T_MUG := preload("res://art/shop/mug.png")
 const T_FRAME := preload("res://art/shop/frame.png")
-const T_PHOTOS := preload("res://art/shop/photos.png")
 const T_ITEMS := {
 	"bear": preload("res://art/shop/item_bear.png"),
 	"ornament": preload("res://art/shop/item_ornament.png"),
@@ -34,19 +41,18 @@ const COUNTER_TEX_Y := 482.7
 const COUNTER_TEX_H := 237.3
 
 # Вещи на прилавке: точка на столешнице (низ спрайта по центру) и высота в игровых px
-const REG_POS := Vector2(118, 592)
-const REG_H := 262.0
 const JAR_POS := Vector2(300, 580)
 const JAR_H := 160.0
 const JAR_SLOT := Vector2(300, 432)
-const CAT_POS := Vector2(990, 590)
+const JAR_W := JAR_H * 235.0 / 333.0   # ширина копилки; высота по картинке (у переполненной монеты торчат выше горлышка)
+## Сколько денег нужно для кадра копилки i (значения по умолчанию).
+const JAR_LEVELS := [0, 1, 10, 25, 45, 70, 100, 135, 175, 220, 270, 330, 400, 480, 570, 680]
+const CAT_POS := Vector2(122, 592)
 const CAT_SCALE := 1.0 / 1.5   # кадры кота хранятся в полуторном размере
 const MUG_POS := Vector2(1075, 565)
 const MUG_H := 82.0
 const FRAME_POS := Vector2(1160, 590)
 const FRAME_H := 190.0
-const PHOTOS_POS := Vector2(1206, 610)
-const PHOTOS_H := 62.0
 
 # Размер спрайта товара на прилавке (для подарка, который летит к клиенту)
 const SHELF_SIZE := {"bear": Vector2(70, 84), "ornament": Vector2(54, 73), "ball": Vector2(74, 76), "train": Vector2(118, 40)}
@@ -65,6 +71,7 @@ const SHELF_VIEW_SCALE := 1.6
 const BACK_BTN := Rect2(34, 650, 170, 48)
 const CUSTOMER_HAND := Vector2(520, 470)
 const GIFT_POS := Vector2(565, 548)
+const TABLE_ITEM_SCALE := 1.5   # игрушка на столе крупнее, чем на полке: её нужно нажать
 const MOUTH := Vector2(555, 300)
 
 # Вывески сверху и две плашки внизу (вставки для текста)
@@ -84,6 +91,8 @@ var time := 0.0
 var font: Font
 var bubble_style: StyleBoxFlat
 var thought_style: StyleBoxFlat
+var water_style: StyleBoxFlat
+var thought_fill := 0.0       # 0..1: облачко мыслей как сосуд, серая «вода» поднимается снизу вверх (время мыслей)
 var bubble_text := ""
 var bubble_kind := "speech"   # speech или thought (мысли клиента)
 var bubble_name := ""
@@ -108,8 +117,13 @@ var cat_happy_left := 0.0
 var cat_frame := 0
 var purr_cd := 0.0
 var jar_bump := 0.0
-var reg_pop := 0.0
+var pending_money := 0.0      # деньги, которые ещё летят в копилку (в кассе уже есть, в банке ещё нет)
+var jar_money := -1.0         # сколько денег сейчас показано в банке (плавно догоняет кассу)
+var pay_floats: Array = []    # всплывающие «+N» над копилкой
 var give: Dictionary = {}
+var table_item := ""          # игрушка, которую клиент выбрал: просто лежит на столе
+var table_t := 1.0
+var gift_clickable := false
 var gift_look: Dictionary = {}
 var gift_poly := PackedVector2Array()
 var gift_t := 0.0
@@ -134,6 +148,10 @@ func _ready() -> void:
 	thought_style.set_corner_radius_all(44)
 	thought_style.shadow_color = Color(0, 0, 0, 0.3)
 	thought_style.shadow_size = 8
+	water_style = StyleBoxFlat.new()
+	water_style.bg_color = Color(0.40, 0.44, 0.54, 0.52)
+	water_style.corner_radius_bottom_left = 40
+	water_style.corner_radius_bottom_right = 40
 	glow_style = StyleBoxFlat.new()
 	glow_style.bg_color = Color(1.0, 0.9, 0.5, 0.12)
 	glow_style.border_color = Color(1.0, 0.9, 0.5, 0.9)
@@ -149,6 +167,10 @@ func show_thought(person: String, text: String) -> void:
 	bubble_name = "Thoughts: " + person
 	bubble_text = text
 	bubble_t = 0.0
+
+
+func set_thought_fill(f: float) -> void:
+	thought_fill = clampf(f, 0.0, 1.0)
 
 
 func set_offer(on: bool) -> void:
@@ -177,18 +199,44 @@ func set_tips(n: int) -> void:
 
 func add_tip_coins(n: int) -> void:
 	for i in n:
-		fly_coins.append({"t": -0.22 * float(i), "from": CUSTOMER_HAND + Vector2(20, -20), "to": JAR_SLOT})
+		fly_coins.append({"t": -0.22 * float(i), "from": CUSTOMER_HAND + Vector2(20, -20), "to": JAR_SLOT,
+			"kind": "tip", "carry": 1.0, "float": n if i == 0 else 0})
 
 
-func pay_pop() -> void:
-	reg_pop = 1.0
+## Клиент кладёт деньги в копилку: монетки летят в банку, над ней загорается «+N» и растворяется вверх.
+func pay_pop(amount: int) -> void:
+	var n := clampi(ceili(float(amount) / 9.0), 1, 7)
+	pending_money += float(amount)
+	for i in n:
+		fly_coins.append({"t": -0.13 * float(i), "from": CUSTOMER_HAND + Vector2(24, -14), "to": JAR_SLOT,
+			"kind": "pay", "carry": float(amount) / float(n), "float": amount if i == 0 else 0})
 	AudioSynth.play_sfx("coin", 0.0, 0.9)
 
 
 ## Выбранный подарок едет на прилавок.
 func give_item(item_id: String) -> void:
-	give = {"id": item_id, "t": 0.0}
+	table_item = item_id
+	table_t = 0.0
+	gift_clickable = false
 	AudioSynth.play_sfx("pop_in")
+
+
+## Подарок на столе можно нажать, чтобы начать упаковку.
+func set_gift_clickable(on: bool) -> void:
+	gift_clickable = on and table_item != ""
+
+
+## Подарок забрали со стола (мы идём упаковывать).
+func take_item() -> void:
+	table_item = ""
+	gift_clickable = false
+
+
+func _gift_rect() -> Rect2:
+	if table_item == "":
+		return Rect2()
+	var sz := _item_size(table_item) * TABLE_ITEM_SCALE
+	return Rect2(GIFT_POS - sz * 0.5, sz).grow(16.0)
 
 
 func show_gift(look: Dictionary) -> void:
@@ -216,6 +264,11 @@ func reset() -> void:
 	shelf_open = false
 	give = {}
 	gift_look = {}
+	table_item = ""
+	gift_clickable = false
+	pending_money = 0.0
+	pay_floats.clear()
+	jar_money = -1.0
 	fly_coins.clear()
 	tips_shown = 0
 
@@ -249,8 +302,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (shelf_hover_id != "" or back_hover) else Input.CURSOR_ARROW)
 			return
 		var over_cat := _cat_rect().has_point(p)
+		var over_gift := gift_clickable and _gift_rect().has_point(p)
 		wall_hover = offer_enabled and WALL_SHELF.has_point(p)
-		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (over_cat or wall_hover) else Input.CURSOR_ARROW)
+		Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if (over_cat or wall_hover or over_gift) else Input.CURSOR_ARROW)
 	elif event is InputEventKey:
 		var ke := event as InputEventKey
 		if ke.pressed and ke.keycode == KEY_ESCAPE and shelf_open:
@@ -274,7 +328,10 @@ func _unhandled_input(event: InputEvent) -> void:
 					_close_shelf()
 			return
 		if mb.button_index == MOUSE_BUTTON_LEFT:
-			if offer_enabled and WALL_SHELF.has_point(p2):
+			if gift_clickable and _gift_rect().has_point(p2):
+				AudioSynth.play_sfx("click")
+				gift_clicked.emit()
+			elif offer_enabled and WALL_SHELF.has_point(p2):
 				_open_shelf()
 			elif _cat_rect().has_point(p2):
 				_pet_cat()
@@ -302,6 +359,8 @@ func cursor_pose(p: Vector2) -> String:
 		return "point"
 	if shelf_open:
 		return "hover" if (_shelf_view_at(p) != "" or BACK_BTN.has_point(p)) else "point"
+	if gift_clickable and _gift_rect().has_point(p):
+		return "hover"
 	if _cat_rect().has_point(p):
 		return "pet"
 	if offer_enabled and WALL_SHELF.has_point(p):
@@ -358,7 +417,6 @@ func _process(delta: float) -> void:
 	gift_t = minf(gift_t + delta / 0.6, 1.0)
 	purr_cd = maxf(purr_cd - delta, 0.0)
 	jar_bump = maxf(jar_bump - delta * 2.5, 0.0)
-	reg_pop = maxf(reg_pop - delta * 2.2, 0.0)
 	shelf_t = move_toward(shelf_t, 1.0 if shelf_open else 0.0, delta / 0.22)
 	_update_cat(delta)
 	for i in range(hearts.size() - 1, -1, -1):
@@ -369,14 +427,32 @@ func _process(delta: float) -> void:
 	for i in range(fly_coins.size() - 1, -1, -1):
 		fly_coins[i]["t"] += delta / 0.75
 		if fly_coins[i]["t"] >= 1.0:
+			var fc: Dictionary = fly_coins[i]
 			fly_coins.remove_at(i)
-			tips_shown += 1
+			if str(fc.get("kind", "tip")) == "pay":
+				pending_money = maxf(pending_money - float(fc["carry"]), 0.0)
+			else:
+				tips_shown += 1
+			if int(fc.get("float", 0)) > 0:
+				var is_tip := str(fc.get("kind", "tip")) == "tip"
+				var txt := "+%d" % int(fc["float"])
+				if is_tip:
+					txt += " tip"
+				pay_floats.append({"t": 0.0, "text": txt, "tip": is_tip})
 			jar_bump = 1.0
 			AudioSynth.play_sfx("coin", 0.0, randf_range(0.95, 1.15))
-	if not give.is_empty():
-		give["t"] += delta / 0.8
-		if give["t"] >= 1.0:
-			give = {}
+	# денег в банке столько, сколько в кассе (плюс чаевые в банке), без тех, что ещё летят; уходят и приходят плавно
+	var jar_target := maxf(float(info.get("cash", 0)) + float(tips_shown) - pending_money, 0.0)
+	if jar_money < 0.0:
+		jar_money = jar_target
+	jar_money = move_toward(jar_money, jar_target, 70.0 * delta)
+	for i in range(pay_floats.size() - 1, -1, -1):
+		pay_floats[i]["t"] += delta / 1.9
+		if pay_floats[i]["t"] >= 1.0:
+			pay_floats.remove_at(i)
+	if table_item != "" and table_t < 1.0:
+		table_t = minf(table_t + delta / 0.25, 1.0)
+		if table_t >= 1.0:
 			item_given.emit()
 	queue_redraw()
 
@@ -394,6 +470,15 @@ func _draw() -> void:
 	_draw_shelf_view()
 	_draw_bubble()
 	_draw_coins_and_hearts()
+
+
+## Номер картинки копилки для суммы денег.
+static func jar_level(money: float) -> int:
+	var lvl := 0
+	for i in JAR_LEVELS.size():
+		if money >= float(JAR_LEVELS[i]):
+			lvl = i
+	return lvl
 
 
 ## Спрайт вещи: низ по центру в точке feet, высота h; squash сжимает по вертикали (прыжок кассы и банки).
@@ -415,22 +500,13 @@ func _draw_counter() -> void:
 
 
 func _draw_props() -> void:
-	# касса подпрыгивает, когда клиент платит
-	_prop(T_REGISTER, REG_POS, REG_H, 1.0 - 0.08 * sin(reg_pop * PI) * reg_pop)
-	# банка: монеты внутри рисуются под стеклом
+	# копилка: чем больше денег, тем полнее картинка; при падении монеты чуть подпрыгивает
 	var bump := -absf(sin(jar_bump * PI * 3.0)) * 4.0 * jar_bump
-	var n := mini(tips_shown, 48)
-	for i in n:
-		var col_i := i % 6
-		var row_i := floori(float(i) / 6.0)
-		var hsh := U.hash2(i, 7)
-		var p := Vector2(JAR_POS.x - 29.0 + float(col_i) * 11.5 + hsh * 4.0, JAR_POS.y - 12.0 - float(row_i) * 6.5 + bump)
-		U.fill_stroke(self, U.ellipse(p, 7.5, 4.2), Color("#e3b84b"), 2.0, time, 0.4)
-		draw_circle(p + Vector2(-2.0, -1.0), 1.4, Color(1, 0.95, 0.6, 0.85))
-	_prop(T_JAR, JAR_POS, JAR_H, 1.0, -bump)
+	var jar := T_JARS[jar_level(jar_money)]
+	var jh := JAR_W * float(jar.get_height()) / float(jar.get_width())
+	_prop(jar, JAR_POS, jh, 1.0, -bump)
 	_prop(T_MUG, MUG_POS, MUG_H)
 	_prop(T_FRAME, FRAME_POS, FRAME_H)
-	_prop(T_PHOTOS, PHOTOS_POS, PHOTOS_H)
 
 
 func _draw_cat() -> void:
@@ -516,6 +592,16 @@ func _draw_coins_and_hearts() -> void:
 		var pos := a.lerp(b, U.ease_in_out(t)) + Vector2(0.0, -sin(t * PI) * 110.0)
 		var squash := 1.0 + 0.25 * sin(t * PI * 3.0)
 		U.fill_stroke(self, U.ellipse(pos, 9.0 * squash, 6.0 / squash), Color("#e6b83a"), 2.5, time, 0.6)
+	for pf in pay_floats:
+		var pt: float = pf["t"]
+		var alpha := 1.0 - smoothstep(0.5, 1.0, pt)
+		var rise := 1.0 - (1.0 - pt) * (1.0 - pt)
+		var base := JAR_SLOT + Vector2(0.0, -34.0 - 92.0 * rise)
+		var big := 44 if not bool(pf["tip"]) else 30
+		var col := Color(1.0, 0.92, 0.45, alpha) if not bool(pf["tip"]) else Color(1.0, 0.86, 0.6, alpha)
+		draw_circle(base + Vector2(0.0, -big * 0.3), float(big) * 1.1, Color(1.0, 0.88, 0.35, 0.16 * alpha))   # мягкое свечение
+		draw_string_outline(font, base + Vector2(-110.0, 0.0), str(pf["text"]), HORIZONTAL_ALIGNMENT_CENTER, 220.0, big, 9, Color(0.32, 0.18, 0.05, 0.85 * alpha))
+		draw_string(font, base + Vector2(-110.0, 0.0), str(pf["text"]), HORIZONTAL_ALIGNMENT_CENTER, 220.0, big, col)
 	for h in hearts:
 		var t2: float = h["t"]
 		if t2 < 0.0:
@@ -538,6 +624,7 @@ func _draw_bubble() -> void:
 	draw_set_transform(pivot * (1.0 - s), 0.0, Vector2(s, s))
 	if bubble_kind == "thought":
 		draw_style_box(thought_style, rect)
+		_draw_thought_water(rect)
 		var puffs := [Vector2(rect.position.x + 26.0, rect.end.y + 18.0), Vector2(rect.position.x - 6.0, rect.end.y + 42.0), Vector2(rect.position.x - 30.0, rect.end.y + 62.0)]
 		var radii := [13.0, 9.0, 6.0]
 		for k in 3:
@@ -548,30 +635,64 @@ func _draw_bubble() -> void:
 			draw_colored_polygon(U.star(sp, 7.0, 2.6, 4, time + float(k)), Color(0.7, 0.8, 1.0, 0.6 + 0.4 * sin(time * 4.0 + float(k))))
 	else:
 		draw_style_box(bubble_style, rect)
-		var tail := PackedVector2Array([Vector2(rect.position.x + 30.0, rect.end.y - 60.0), Vector2(rect.position.x + 30.0, rect.end.y - 16.0), MOUTH])
-		draw_colored_polygon(tail, BUBBLE_COLOR)
-		draw_polyline(PackedVector2Array([tail[0], tail[2], tail[1]]), U.INK, 4.0, true)
-		draw_rect(Rect2(rect.position.x + 27.0, rect.end.y - 58.0, 6.0, 40.0), BUBBLE_COLOR)
+		# хвостик: контур рисуем только снаружи облачка (от левого края к рту), иначе линии заходят на текст
+		var bx := rect.position.x
+		var p0 := Vector2(bx + 30.0, rect.end.y - 60.0)
+		var p1 := Vector2(bx + 30.0, rect.end.y - 16.0)
+		if MOUTH.x < bx - 8.0:
+			var b0 := p0.lerp(MOUTH, (bx - p0.x) / (MOUTH.x - p0.x))
+			var b1 := p1.lerp(MOUTH, (bx - p1.x) / (MOUTH.x - p1.x))
+			draw_colored_polygon(PackedVector2Array([b0 + Vector2(5.0, 0.0), b0, MOUTH, b1, b1 + Vector2(5.0, 0.0)]), BUBBLE_COLOR)
+			draw_polyline(PackedVector2Array([b0, MOUTH, b1]), U.INK, 4.0, true)
+			draw_rect(Rect2(bx - 2.5, b0.y + 2.0, 9.0, b1.y - b0.y - 4.0), BUBBLE_COLOR)   # убирает край облачка между концами хвостика
 	draw_string(font, Vector2(rect.position.x + BUBBLE_PAD, rect.position.y + 40.0), bubble_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.62, 0.38, 0.26) if bubble_kind == "speech" else Color(0.32, 0.4, 0.62))
 	draw_multiline_string(font, Vector2(rect.position.x + BUBBLE_PAD, rect.position.y + 52.0 + font.get_ascent(BUBBLE_FONT)), bubble_text,
 		HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 2.0 * BUBBLE_PAD, BUBBLE_FONT, -1, U.INK)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+## Серая вода в облачке мыслей: уровень растёт с таймером, у поверхности лёгкая волна и пузырьки.
+func _draw_thought_water(rect: Rect2) -> void:
+	if thought_fill <= 0.001:
+		return
+	var inner := rect.grow(-4.0)
+	var f := thought_fill
+	var y_w := inner.end.y - f * inner.size.y
+	var h := inner.end.y - y_w
+	var top_r := 40 if f > 0.88 else 0   # у самого верха вода повторяет круглые углы облачка
+	water_style.corner_radius_top_left = top_r
+	water_style.corner_radius_top_right = top_r
+	draw_style_box(water_style, Rect2(inner.position.x, y_w, inner.size.x, h))
+	if f < 0.985:
+		var pts := PackedVector2Array()
+		var x := inner.position.x + 36.0
+		while x <= inner.end.x - 36.0:
+			pts.append(Vector2(x, y_w + sin(time * 2.6 + x * 0.05) * 2.4))
+			x += 10.0
+		if pts.size() > 1:
+			draw_polyline(pts, Color(0.88, 0.92, 0.98, 0.6), 3.0, true)
+	if h > 24.0:
+		for i in 6:
+			var ph := fposmod(time * 0.18 + float(i) * 0.173, 1.0)
+			var bx := inner.position.x + 50.0 + fposmod(float(i) * 137.0 + sin(time + float(i)) * 6.0, inner.size.x - 100.0)
+			var by := inner.end.y - 8.0 - ph * (h - 12.0)
+			draw_circle(Vector2(bx, by), 2.0 + float(i % 3), Color(0.9, 0.94, 1.0, 0.35 * (1.0 - ph * 0.6)))
+
+
 # --- Подарок ---------------------------------------------------------------------------
 
 func _draw_give() -> void:
-	if give.is_empty():
+	if table_item == "":
 		return
-	var t: float = give["t"]
-	var id: String = give["id"]
-	var a := CUSTOMER_HAND
-	var b := GIFT_POS
-	var e := U.ease_in_out(t)
-	var pos := a.lerp(b, e) + Vector2(0.0, -sin(e * PI) * 90.0)
-	var s := 1.0 + 0.1 * sin(e * PI)
-	var sz := _item_size(id)
-	draw_texture_rect(T_ITEMS[id], Rect2(pos - sz * s * 0.5, sz * s), false)
+	var sz := _item_size(table_item) * TABLE_ITEM_SCALE
+	var a := clampf(table_t, 0.0, 1.0)
+	if gift_clickable:
+		var pulse := 0.5 + 0.5 * sin(time * 4.0)
+		draw_circle(GIFT_POS, maxf(sz.x, sz.y) * 0.62 + 5.0 * pulse, Color(1.0, 0.93, 0.55, 0.14 + 0.14 * pulse))
+	draw_colored_polygon(U.ellipse(GIFT_POS + Vector2(0.0, sz.y * 0.5), sz.x * 0.42, 7.0), Color(0, 0, 0, 0.22 * a))
+	draw_texture_rect(T_ITEMS[table_item], Rect2(GIFT_POS - sz * 0.5, sz), false, Color(1, 1, 1, a))
+	if gift_clickable:
+		_txt(GIFT_POS + Vector2(-110.0, -sz.y * 0.5 - 16.0), "Click to wrap", 22, Color(1, 0.96, 0.85), true, HORIZONTAL_ALIGNMENT_CENTER, 220.0)
 
 
 func _draw_gift() -> void:

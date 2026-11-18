@@ -25,6 +25,26 @@ func wait_until(cond: Callable, timeout_s: float, label: String) -> bool:
 	return true
 
 
+func wait_idle(w) -> void:
+	var t0 := Time.get_ticks_msec()
+	while w.fold_busy() and float(Time.get_ticks_msec() - t0) < 8000.0:
+		await process_frame
+
+
+## Один сгиб рукой: схватить бумагу в точке a и довести до b (координаты бумаги), дождаться доводки.
+func fold_by(w, a: Vector2, b: Vector2) -> void:
+	w.fold_drag_begin(w.CENTER + a.rotated(w.rot))
+	if not w.fold_drag:
+		print("   paper was not grabbed at ", a)
+		failed = true
+		return
+	for k in range(1, 7):
+		w.fold_drag_move(w.CENTER + a.lerp(b, float(k) / 6.0).rotated(w.rot))
+		await process_frame
+	w.fold_drag_end()
+	await wait_idle(w)
+
+
 ## Заворачивает подарок на столе: идеально или криво.
 func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 	var w = main.wrap
@@ -86,26 +106,47 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 	var fh: float = w._flap_len()
 	var hw: float = w._along() * 0.5
 	var hh: float = w._across() * 0.5
+	if skew:
+		# угол листа загибаем по диагонали через вещь, потом откатываем: бумага мнётся, всё возвращается
+		var ys: float = hh + w.MARGIN
+		var corner := Vector2(w._sheet_poly()[0].x + 14.0, -ys + 14.0)
+		await fold_by(w, corner, Vector2(-hw * 0.2, -hh * 0.2))
+		if w.fold.fold_count() != 1:
+			print("   diagonal corner fold was not applied, folds=", w.fold.fold_count())
+			failed = true
+		w.fold_undo()
+		await wait_idle(w)
+		if w.fold.fold_count() != 0 or w.crumples != 1:
+			print("   undo failed, folds=", w.fold.fold_count(), " crumples=", w.crumples)
+			failed = true
 	var starts: Array = [Vector2(-hw - fh * 0.8, 0.0), Vector2(hw + fh * 0.8, 0.0), Vector2(0.0, -hh - 22.0), Vector2(0.0, hh + 22.0)]
 	var ends: Array = [Vector2(10.0, 0.0), Vector2(-10.0, 0.0), Vector2(0.0, 10.0), Vector2(0.0, -10.0)]
 	var count := 4 if perfect else 1
+	var tops: Array = []
 	for i in count:
-		var a: Vector2 = starts[i]
-		var b: Vector2 = ends[i]
-		w._begin_flap_drag(w.CENTER + a.rotated(w.rot))
-		if skew and i == 0:
-			b += Vector2(0.0, 44.0)   # тянем клапан вбок: загиб по диагонали
-		w._update_flap_drag(w.CENTER + b.rotated(w.rot))
-		if skew and i == 0 and absf(w.tilt[0]) < 0.01:
-			print("   flap did not tilt")
+		await fold_by(w, starts[i], ends[i])
+		tops.append(w.fold.top_layer())
+	if w.fold.fold_count() != count + 0:
+		print("   expected ", count, " folds, got ", w.fold.fold_count())
+		failed = true
+	if perfect and not skew and w.length_class != "short":
+		# бумага всегда сверху: слои растут по порядку сгибов, а вещь закрыта целиком
+		for k in range(1, tops.size()):
+			if int(tops[k]) <= int(tops[k - 1]):
+				print("   layer order broken: ", tops)
+				failed = true
+		var cov: float = w.fold.coverage(w.gift_hull)
+		if cov < 0.97:
+			print("   four straight folds do not cover the gift, coverage=", cov)
 			failed = true
-		if w.flap_drag < 0:
-			print("   flap ", i, " was not picked")
-			failed = true
-		w._end_flap_drag()
 	if perfect:
-		ok = await wait_until(func(): return w.tucked, 10.0, "tucked")
+		await create_timer(0.8).timeout
+		var cov_now: float = w.fold.coverage(w.gift_hull)
+		ok = true
+		if cov_now >= 0.96:
+			ok = await wait_until(func(): return w.tucked, 10.0, "tucked")
 		if not ok:
+			print("   folds=", w.fold.fold_count(), " cover=", w.fold.coverage(w.gift_hull), " loose=", w.fold.loose_area(w.fold_ref), " hang=", w.fold.hanging_area(w.fold_ref), " skew=", w.cut_skew, " mode=", w.wrap_mode, " axis=", w.axis)
 			return false
 		await create_timer(1.0).timeout
 		w._select_tool("tape")
@@ -125,7 +166,11 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 			# лента кладётся двумя щелчками: край подарка, потом противоположный край
 			w._ribbon_press(w.CENTER + Vector2(-w.item_w * 0.5 - 2.0, 4.0))
 			if not w.ribbon_anchored:
-				print("   ribbon did not anchor at the edge")
+				var reg: PackedVector2Array = w._stroke_region()
+				var bb := Rect2(reg[0], Vector2.ZERO)
+				for q in reg:
+					bb = bb.expand(q)
+				print("   ribbon did not anchor at the edge: region ", bb, " item ", w.item_w, "x", w.item_h, " axis=", w.axis, " skew=", w.cut_skew, " folds=", w.fold.fold_count(), " tucked=", w.tucked, " tape=", w.tape_strokes.size(), " tool=", w.active_tool, " step=", w.step)
 				failed = true
 			w._ribbon_press(w.CENTER + Vector2(w.item_w * 0.5 + 2.0, 4.0))
 			w._ribbon_press(w.CENTER + Vector2(4.0, -w.item_h * 0.5 - 2.0))
@@ -143,7 +188,8 @@ func wrap_gift(perfect: bool, vertical: bool, skew: bool = false) -> bool:
 func run() -> void:
 	await process_frame
 	Engine.time_scale = 3.0
-	main.auto_play = true   # без диалогов и экранов выбора: история и поставки проверяет tools/smoke.gd
+	main.auto_play = true
+	main.think_time = 1.0   # мысли клиента наполняются секунду, а не двадцать   # без диалогов и экранов выбора: история и поставки проверяет tools/smoke.gd
 	main._start_game()
 	var served := 0
 	var crooked_done := false
@@ -170,6 +216,8 @@ func run() -> void:
 		var ideal: String = main.current["ideal"]
 		var guessed := served % 3 != 1
 		print("--- ", cname, " ideal=", ideal, " guess=", guessed)
+		if served % 4 == 3 and str(main.current.get("scene", "")) != "santa":
+			await wait_until(func(): return main.patience_on, 30.0, "thoughts spoken")   # путь «клиент сам сказал мысли»
 		var pick: String = ideal
 		if not main.stock.infinite:
 			# после ночи 1 на полке только то, что заказали: берём игрушку нужного вида, иначе любую

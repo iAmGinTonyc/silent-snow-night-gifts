@@ -93,9 +93,12 @@ func show_summary(l: Dictionary, balance: int, n: int, total: int) -> void:
 	summary_next.text = "Finish" if n >= total else "Next"
 	var net: int = l["net"]
 	var sign_net := "+" if net >= 0 else "-"
-	summary_text.text = "Gift sales: +%d\nExpenses: -%d\n   paper %d · wasted %d · tape %d · ribbon %d · boxes %d · stock %d\nTips from the jar: +%d\nTonight: %s%d\nIn the till: %d" % [
+	var complaint_line := ""
+	if int(l.get("complaint", 0)) > 0:
+		complaint_line = "\nAfter-hours complaint: %d customer(s) came after the shift to scold us about broken toys: -%d" % [int(l.get("complaint_n", 1)), int(l["complaint"])]
+	summary_text.text = "Gift sales: +%d\nExpenses: -%d\n   paper %d · wasted %d · tape %d · ribbon %d · boxes %d · stock %d%s\nTips from the jar: +%d\nTonight: %s%d\nIn the till: %d" % [
 		int(l["revenue"]), int(l["expenses"]), int(l["paper"]), int(l["waste"]), int(l["tape"]),
-		int(l["ribbon"]), int(l["box"]), int(l["stock"]), int(l["tips"]), sign_net, absi(net), balance]
+		int(l["ribbon"]), int(l["box"]), int(l["stock"]), complaint_line, int(l["tips"]), sign_net, absi(net), balance]
 	summary_root.visible = true
 
 

@@ -8,6 +8,7 @@ var out_dir := "/tmp"
 
 
 func _initialize() -> void:
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_ALWAYS_ON_TOP, true)   # иначе macOS замораживает кадры, если окно закрыто другим
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		out_dir = args[0]

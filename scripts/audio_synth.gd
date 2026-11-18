@@ -16,7 +16,22 @@ const GAIN := {
 	"buy": -13.0, "spend": -17.0, "click": -18.0,
 }
 
+## Голоса для бормотания клиентов: основной тон, сдвиг формант, длина слога, дрожание (у пожилых).
+const VOICES := {
+	"child": {"f0": 420.0, "fs": 1.25, "dur": 0.085, "wob": 0.0},
+	"woman": {"f0": 235.0, "fs": 1.12, "dur": 0.10, "wob": 0.0},
+	"man": {"f0": 118.0, "fs": 1.0, "dur": 0.11, "wob": 0.0},
+	"young": {"f0": 175.0, "fs": 1.06, "dur": 0.095, "wob": 0.0},
+	"elder_woman": {"f0": 208.0, "fs": 1.08, "dur": 0.115, "wob": 0.035},
+	"elder_man": {"f0": 98.0, "fs": 0.97, "dur": 0.125, "wob": 0.03},
+}
+const VOWELS := [[730.0, 1090.0], [530.0, 1840.0], [270.0, 2290.0], [570.0, 840.0], [300.0, 870.0]]
+
 var sfx: Dictionary = {}
+var _voice_clips := {}
+var _babble_token := 0
+var _babble_players: Array = []
+var _babble_next := 0
 var notes: Array = []
 var bass: Array = []
 
@@ -47,6 +62,10 @@ func _ready() -> void:
 	_bass_player = AudioStreamPlayer.new()
 	_bass_player.volume_db = -34.0
 	add_child(_bass_player)
+	for i in 2:
+		var bp := AudioStreamPlayer.new()
+		add_child(bp)
+		_babble_players.append(bp)
 	_build_all()
 
 
@@ -63,6 +82,88 @@ func play_sfx(sfx_name: String, vol_db: float = 0.0, pitch: float = 1.0) -> void
 	p.volume_db = float(GAIN.get(sfx_name, -14.0)) + minf(vol_db, 0.0)
 	p.pitch_scale = pitch
 	p.play()
+
+
+## Сколько секунд клиент говорит текст (по длине).
+func babble_seconds(text_len: int) -> float:
+	return clampf(float(text_len) * 0.05, 1.8, 8.0)
+
+
+## Неразборчивая речь: слоги с гласными, высота и тембр по голосу клиента (возраст и пол). Не ждёт окончания.
+func babble(voice: String, seconds: float) -> void:
+	_babble_token += 1
+	var tok := _babble_token
+	var clips: Array = _voice(voice)
+	var t := 0.0
+	var syl := 0
+	var word := _rng.randi_range(2, 4)
+	while t < seconds and tok == _babble_token:
+		var clip: AudioStreamWAV = clips[_rng.randi() % clips.size()]
+		var p: AudioStreamPlayer = _babble_players[_babble_next]
+		_babble_next = (_babble_next + 1) % _babble_players.size()
+		p.stream = clip
+		p.volume_db = -15.0 + _rng.randf_range(-2.0, 1.0)
+		p.pitch_scale = _rng.randf_range(0.96, 1.05)
+		p.play()
+		var d := clip.get_length() + _rng.randf_range(0.015, 0.05)
+		syl += 1
+		if syl >= word:
+			d += _rng.randf_range(0.09, 0.2)
+			syl = 0
+			word = _rng.randi_range(2, 4)
+		await get_tree().create_timer(d).timeout
+		t += d
+
+
+func stop_babble() -> void:
+	_babble_token += 1
+	for p in _babble_players:
+		(p as AudioStreamPlayer).stop()
+
+
+## Слоги голоса создаются при первом обращении (около десяти коротких клипов).
+func _voice(voice_name: String) -> Array:
+	if _voice_clips.has(voice_name):
+		return _voice_clips[voice_name]
+	var v: Dictionary = VOICES.get(voice_name, VOICES["woman"])
+	var clips: Array = []
+	for vow in VOWELS:
+		for pv in [0.93, 1.07]:
+			clips.append(_gen_syllable(float(v["f0"]) * float(pv), float(vow[0]) * float(v["fs"]), float(vow[1]) * float(v["fs"]), float(v["dur"]), float(v["wob"])))
+	_voice_clips[voice_name] = clips
+	return clips
+
+
+## Один слог: гармоники основного тона с пиками на двух формантах (гласная), плавный контур высоты, щелчок шума в начале.
+func _gen_syllable(f0: float, f1: float, f2: float, dur: float, wob: float) -> AudioStreamWAV:
+	var n := int(dur * RATE)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var harm := mini(int(3800.0 / f0), 22)
+	var amps := PackedFloat32Array()
+	amps.resize(harm)
+	for k in harm:
+		var fr := f0 * float(k + 1)
+		amps[k] = 0.30 / float(k + 1) + exp(-pow((fr - f1) / 170.0, 2.0)) + 0.55 * exp(-pow((fr - f2) / 240.0, 2.0))
+	var phase := 0.0
+	var peak := 0.0001
+	for i in n:
+		var t := float(i) / float(RATE)
+		var u := t / dur
+		var f := f0 * (1.0 + 0.05 * (0.5 - u) + wob * sin(TAU * 5.3 * t))
+		phase += TAU * f / float(RATE)
+		var v := 0.0
+		for k in harm:
+			v += amps[k] * sin(phase * float(k + 1))
+		if t < 0.012:
+			v += _noise() * 1.4 * (1.0 - t / 0.012)
+		v *= pow(sin(PI * u), 0.7)
+		s[i] = v
+		peak = maxf(peak, absf(v))
+	var gain := 0.45 / peak
+	for i in n:
+		s[i] *= gain
+	return _make_wav(s)
 
 
 func start_music() -> void:
