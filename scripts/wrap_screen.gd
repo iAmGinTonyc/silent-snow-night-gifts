@@ -73,7 +73,24 @@ const BELL_R := 31.0
 const AXIS_POS := Vector2(333, 192)
 const METER_RECT := Rect2(470, 590, 340, 22)   # оценка качества упаковки внизу зелёной части экрана
 const REWRAP_NEAT := 0.5                      # ниже этого клиент просит переделать (значение задаёт main.gd)
-const UNDO_RECT := Rect2(330, 538, 132, 64)   # кнопка отката в левом нижнем углу мата (на сенсорном экране нет правой кнопки)   # левый верхний угол кнопки Horizontal (внутри контура мата)
+const UNDO_RECT := Rect2(312, 164, 124, 64)   # кнопка отката в левом верхнем углу мата: туда бумага не доходит ни при какой вытяжке (на сенсорном экране нет правой кнопки)
+const COACH_RECT := Rect2(262, 616, 760, 26)  # полоса этапов под шкалой качества (первые ночи)
+const COACH_HIDE := Rect2(1000, 618, 22, 22)  # крестик, который прячет обучение
+const COACH_NAMES := ["Box", "Paper", "Pull", "Cut", "Fold", "Tape", "Ribbon", "Bow", "Bell"]
+## Подробная подсказка, когда начинается этап (первые ночи), по одной на этап и подарок.
+const COACH_TIPS := [
+	"Step 1: pick a box for the gift, or wrap it by its shape",
+	"Step 2: click a paper roll on the left to pick the paper",
+	"Step 3: drag the paper out of the roll until it covers the gift with some margin",
+	"Step 4: take the scissors and cut across along the pencil line",
+	"Step 5: fold every flap over the gift: drag it, or just tap it. Left, right, then top and bottom",
+	"Step 6: take the tape and click along each seam so the flaps hold",
+	"Step 7: take a ribbon spool, click one edge of the gift, then the opposite edge",
+	"Step 8: lay a second ribbon across the first: a bow appears where they cross. Drag the bow to resize it",
+	"Step 9: ring the bell to hand over the gift",
+]
+const GUIDED_NIGHTS := 2                      # сколько первых ночей показываем подробное обучение
+const GUIDED_GIFTS := 4                       # пока main.gd не сообщил номер ночи: столько первых подарков
 const PX_PER_CM := 6.0      # масштаб линейки: 1 см = 6 px
 const CARD_SIZE := Vector2(200, 240)
 
@@ -91,11 +108,19 @@ const RIBBON_W := 20.0
 const RIBBON_MIN_LEN := 80.0  # меньше этого ленты не видно как ленту
 const STROKE_MAX := 8
 const REACH := 12.0           # насколько за край бумаги можно вести скотч и ленту
+const BOW_MIN := 0.6
+const BOW_MAX := 1.8
+const BOW_DRAG_PX := 80.0     # на сколько px отвести руку от банта, чтобы он вырос на 100%
+const CROSS_MIN_SIN := 0.55   # ленты считаются перекрещенными, если угол между ними не меньше ~33 градусов
+const STRIP_PICK := 9.0       # на сколько px мимо полоски скотча или ленты рука всё ещё берёт её
 const RIBBON_PICK := 34.0     # на каком расстоянии от края можно «взять» начало ленты
 const RIBBON_MIN_PIECE := 36.0  # самый короткий кусок ленты от края до края
 const FOLD_MIN_DRAG := 12.0   # меньше этого рука просто лежит на бумаге
 const FOLD_COMMIT_PHI := 0.9  # около 50 градусов: дальше сгиб довершается сам, меньше пружинит назад
-const FOLD_GRAB_R := 34.0     # бумагу можно взять и рядом с краем листа: ближайший свободный клапан в этом радиусе
+const FOLD_GRAB_R := 46.0     # бумагу можно взять и мимо листа: ближайшая свободная бумага в этом радиусе от нажатия
+const FOLD_GRAB_R_GIFT := 64.0  # то же при нажатии по голой вещи (клапан тянут и «изнутри», от ребра вещи)
+const FOLD_GRAB_STEP := 5.0   # шаг проб при поиске ближайшей бумаги
+const MAT_GRAB_PAD := 16.0    # бумагу хватают и чуть за контуром мата
 const TAPE_SNAP_R := 26.0     # скотч липнет к краю или шву не дальше этого
 const TAPE_TAP_LEN := 96.0    # полоска скотча по касанию вдоль края
 const FOLD_SNAP_DEG := 5.0    # линия сгиба в пределах этого угла от оси или диагонали становится ровной
@@ -156,6 +181,7 @@ var fold_press := Vector2.ZERO        # где коснулись (коорди�
 var fold_moved := false               # рука сдвинулась дальше порога: иначе это касание
 var tape_snap: Dictionary = {}        # край, вдоль которого идёт скотч: {a, b, start}
 var fold_P := Vector2.ZERO            # где схватили (координаты бумаги)
+var fold_off := Vector2.ZERO          # на сколько рука была мимо схваченной точки: бумага идёт за рукой с этим сдвигом
 var fold_cur: Dictionary = {}         # параметры сгиба под рукой: {valid, n, c, phi, err, on_edge}
 var fold_anim: Dictionary = {}        # сгиб, который доводится сам: {n, c, phi, target, kind}
 var fold_snd_phi := 0.0
@@ -196,9 +222,20 @@ var cut_pts := PackedVector2Array()   # путь ножниц (координа�
 var cut_snd := 0.0
 var bow_size := 1.0
 var bow_drag := false
-var bow_drag_y := 0.0
+var bow_drag_d0 := 0.0                # как далеко от банта взяли его (px): дальше — больше, ближе — меньше
 var bow_drag_start := 1.0
 var bow_pop := 1.0
+var hover_strip: Dictionary = {}      # лента или скотч под рукой без инструмента: {kind, idx}
+var hover_bow := false
+var peel_fx: Array = []               # снятые полоски, которые отлетают: {pts, kind, ribbon, t}
+var removed_once := false             # подсказка «снятое не возвращается» показана
+var tape_tip_done := false            # подсказка про снятие скотча показана для этого подарка
+var night := -1                       # номер ночи с 0: сообщает main.gd через set_night(); -1 пока не сообщил
+var gifts_done := 0                   # сколько подарков отдано через этот экран (пока номер ночи неизвестен)
+var coach_on := true                  # обучение можно закрыть крестиком
+var grab_toast_t := -10.0             # когда последний раз подсказали, за что браться
+var coach_stage := -1                 # этап обучения, о котором уже подсказали для этого подарка
+var bow_resized := false              # бант уже растягивали: кольцо-подсказка больше не мигает
 var length_class := ""
 var arrive_t := 0.0
 var box_t := 1.0
@@ -423,14 +460,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				_on_release()
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT:
-			if ribbon_anchored:
-				_cancel_ribbon()
-			else:
-				fold_undo()
+			_drop_tool()   # правая кнопка убирает инструмент из руки; отменяет сгиб кнопка Undo или Ctrl+Z
 		elif mb.pressed and (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 			if step == Step.WRAP and not ribbon_strokes.is_empty():
 				var d := 0.1 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else -0.1
-				bow_size = clampf(bow_size + d, 0.6, 1.8)
+				bow_size = clampf(bow_size + d, BOW_MIN, BOW_MAX)
 	elif event is InputEventMouseMotion:
 		_on_motion(get_global_mouse_position())
 	elif event is InputEventKey:
@@ -450,6 +484,8 @@ func _card_rect(i: int) -> Rect2:
 func _hit_test(pos: Vector2) -> String:
 	if _undo_visible() and UNDO_RECT.has_point(pos):
 		return "undo"
+	if _guided() and step >= Step.CHOOSE and step <= Step.WRAP and COACH_HIDE.grow(4.0).has_point(pos):
+		return "coach_hide"
 	if pos.distance_to(BELL_POS) < BELL_R + 6.0:
 		return "bell"
 	if pos.distance_to(BIN_POS) < 32.0:
@@ -513,8 +549,11 @@ func _draw() -> void:
 	_draw_bell()
 	_draw_choose_cards()
 	_draw_gift()
+	_draw_strip_hover()
+	_draw_peel_fx()
 	_draw_undo_button()
 	_draw_quality_meter()
+	_draw_coach()
 	_draw_cut_preview()
 	_draw_ruler_overlay()
 	_draw_tooltip()
@@ -958,6 +997,12 @@ func _reset_gift_state() -> void:
 	bow_size = 1.0
 	bow_drag = false
 	bow_pop = 1.0
+	hover_strip = {}
+	hover_bow = false
+	peel_fx = []
+	tape_tip_done = false
+	coach_stage = -1
+	bow_resized = false
 	length_class = ""
 	box_idx = -1
 	box_t = 1.0
@@ -995,6 +1040,15 @@ func _process(delta: float) -> void:
 		st["age"] += delta
 	for st in ribbon_strokes:
 		st["age"] += delta
+	for i in range(peel_fx.size() - 1, -1, -1):
+		peel_fx[i]["t"] += delta / 0.6
+		if peel_fx[i]["t"] >= 1.0:
+			peel_fx.remove_at(i)
+	if _guided() and input_enabled:
+		var stg := _coach_now()
+		if stg > coach_stage and stg >= 0:
+			coach_stage = stg
+			toast.emit(str(COACH_TIPS[stg]))
 
 	if step == Step.ARRIVING:
 		arrive_t += delta / 0.7
@@ -1061,13 +1115,21 @@ func _on_motion(pos: Vector2) -> void:
 	if fold_drag:
 		_fold_move(pos)
 	if bow_drag:
-		bow_size = clampf(bow_drag_start + (bow_drag_y - pos.y) / 120.0, 0.6, 1.8)
+		var dist := (pos - CENTER - _bow_pos()).length()
+		bow_size = clampf(bow_drag_start + (dist - bow_drag_d0) / BOW_DRAG_PX, BOW_MIN, BOW_MAX)
+		if absf(bow_size - bow_drag_start) > 0.05:
+			bow_resized = true
+	_update_hover_items(pos)
 
 
 func _on_press(pos: Vector2) -> void:
 	var hit := _hit_test(pos)
 	if hit == "undo":
 		undo_action()
+		return
+	if hit == "coach_hide":
+		coach_on = false
+		AudioSynth.play_sfx("click")
 		return
 	if hit == "bell":
 		_try_deliver()
@@ -1127,16 +1189,22 @@ func _on_press(pos: Vector2) -> void:
 				pull_press = pos
 				last_pull_len = sheet_len
 	elif step == Step.WRAP:
-		if not ribbon_strokes.is_empty() and _has_ribbon() and _bow_grab(pos):
+		if _has_bow() and _bow_grab(pos):
 			bow_drag = true
-			bow_drag_y = pos.y
+			bow_drag_d0 = (pos - CENTER - _bow_pos()).length()
 			bow_drag_start = bow_size
+			AudioSynth.play_sfx("click")
 			return
 		if active_tool == "ribbon":
 			_ribbon_press(pos)
 		elif active_tool != "":
 			_begin_stroke(pos)
-		elif MAT_RECT.has_point(pos) and absf(paper_shift) < 2.0:
+		elif MAT_RECT.grow(MAT_GRAB_PAD).has_point(pos) and absf(paper_shift) < 2.0:
+			# пустая рука: сначала скотч и лента (их снимают), потом бумага (её сгибают)
+			var sp := _strip_at(pos)
+			if not sp.is_empty():
+				_remove_strip(sp)
+				return
 			_fold_begin(pos)
 
 
@@ -1417,57 +1485,91 @@ func _fold_params(p: Vector2, q: Vector2) -> Dictionary:
 	return {"valid": true, "n": n, "c": c, "phi": acos(cosp), "err": float(sn[1]), "on_edge": absf(c - h) < 0.5}
 
 
+## Лежит ли в точке голая вещь: слой 0 внутри вещи, сверху ничего. За такое место не берутся.
+func _is_bare(hit: Dictionary, tp: Vector2) -> bool:
+	return not hit.is_empty() and int(hit["layer"]) == 0 and Geometry2D.is_point_in_polygon(tp, gift_hull)
+
+
+## За что схватится рука, нажавшая в точке tp (координаты бумаги): {idx, layer, p} или пусто.
+## Прямо по бумаге — за неё. Мимо листа или по голой вещи — за ближайшую бумагу в радиусе FOLD_GRAB_R:
+## тонкий край (поле листа всего 36 px) не надо ловить пикселем, палец и мышь могут промахнуться.
+func _grab_at(tp: Vector2) -> Dictionary:
+	var hit: Dictionary = fold.topmost_at(tp)
+	if not hit.is_empty() and not _is_bare(hit, tp):
+		return {"idx": int(hit["idx"]), "layer": int(hit["layer"]), "p": tp}
+	var reach := FOLD_GRAB_R_GIFT if not hit.is_empty() else FOLD_GRAB_R
+	var k := int(reach / FOLD_GRAB_STEP)
+	var best := {}
+	var bd := reach
+	for ix in range(-k, k + 1):
+		for iy in range(-k, k + 1):
+			var off := Vector2(float(ix), float(iy)) * FOLD_GRAB_STEP
+			var d := off.length()
+			if d >= bd:
+				continue
+			var c := tp + off
+			var h2: Dictionary = fold.topmost_at(c)
+			if h2.is_empty() or _is_bare(h2, c):
+				continue
+			bd = d
+			best = {"idx": int(h2["idx"]), "layer": int(h2["layer"]), "p": c}
+	return best
+
+
+## Есть ли ещё не согнутая бумага, торчащая за вещью: стороны (n смотрит от вещи наружу), где её видно.
+func _free_sides() -> Array:
+	var out: Array = []
+	if fold == null or fold.is_empty() or gift_hull.size() < 3:
+		return out
+	var r := _poly_bounds(gift_hull)
+	var cx := r.get_center()
+	var probes: Array = [
+		[Vector2(1, 0), Vector2(r.end.x + 14.0, cx.y)], [Vector2(-1, 0), Vector2(r.position.x - 14.0, cx.y)],
+		[Vector2(0, 1), Vector2(cx.x, r.end.y + 14.0)], [Vector2(0, -1), Vector2(cx.x, r.position.y - 14.0)]]
+	for pr in probes:
+		var pt: Vector2 = pr[1]
+		for f in fold.facets:
+			if int(f["layer"]) == 0 and Geometry2D.is_point_in_polygon(pt, Fold.poly(f)):
+				out.append({"n": pr[0], "pt": pt})
+				break
+	return out
+
+
+## Закреплена ли бумага скотчем или лентой: тогда её нельзя ни сгибать, ни разворачивать. Сообщает игроку почему.
+func _fasteners_block() -> bool:
+	var has_tape := not tape_strokes.is_empty()
+	var has_ribbon := not ribbon_strokes.is_empty()
+	if not has_tape and not has_ribbon:
+		return false
+	AudioSynth.play_sfx("dull")
+	var what := "tape and ribbon" if (has_tape and has_ribbon) else ("tape" if has_tape else "ribbon")
+	toast.emit("The paper is held by the %s. Take it off first: press it with an empty hand" % what)
+	return true
+
+
 func _fold_begin(pos: Vector2) -> void:
 	if fold == null or fold.is_empty() or not fold_anim.is_empty():
 		return
-	if not tape_strokes.is_empty():
-		AudioSynth.play_sfx("dull")
-		toast.emit("The paper is taped: no more folding")
+	if _fasteners_block():
 		return
 	var tp := _to_paper(pos - CENTER)
-	var hit: Dictionary = fold.topmost_at(tp)
-	var bare := not hit.is_empty() and int(hit["layer"]) == 0 and Geometry2D.is_point_in_polygon(tp, gift_hull)
-	var grab_idx := -1
-	var grab_layer := 0
-	var grab_p := tp
-	if hit.is_empty() or bare:
-		# мимо бумаги или по голой вещи: берём ближайший свободный клапан рядом (на сенсорном экране палец не попадает точно)
-		var fl := _nearest_flap(tp)
-		if fl.is_empty():
-			return
-		grab_idx = int(fl["idx"])
-		grab_p = fl["centroid"]
-	else:
-		grab_idx = int(hit["idx"])
-		grab_layer = int(hit["layer"])
+	var grab: Dictionary = _grab_at(tp)
+	if grab.is_empty():
+		# ничего рядом: объясняем, за что браться (не чаще раза в 4 секунды)
+		if time - grab_toast_t > 4.0 and not tucked:
+			grab_toast_t = time
+			toast.emit("Press on the paper that sticks out and drag it over the gift")
+		return
 	fold_drag = true
 	fold_moved = false
 	fold_press = tp
-	fold_grab_idx = grab_idx
-	fold_grab_layer = grab_layer
-	fold_P = grab_p
+	fold_grab_idx = int(grab["idx"])
+	fold_grab_layer = int(grab["layer"])
+	fold_P = grab["p"]
+	fold_off = tp - fold_P
 	fold_cur = {}
 	fold_snd_phi = 0.0
 	AudioSynth.play_sfx("paper_rustle", -5.0, randf_range(0.9, 1.15))
-
-
-## Ближайший к точке свободный клапан слоя 0 (его центр вне прямоугольника вокруг вещи), не дальше FOLD_GRAB_R.
-func _nearest_flap(tp: Vector2) -> Dictionary:
-	var best := {}
-	var bd := FOLD_GRAB_R
-	for i in fold.facets.size():
-		var f: Dictionary = fold.facets[i]
-		if int(f["layer"]) != 0:
-			continue
-		var pl := Fold.poly(f)
-		var cen := Fold.centroid(pl)
-		if Geometry2D.is_point_in_polygon(cen, fold_ref):
-			continue
-		var d := Fold.dist_to_poly(tp, pl)
-		if d <= bd:
-			bd = d
-			best = {"idx": i, "centroid": cen}
-	return best
 
 
 func _fold_move(pos: Vector2) -> void:
@@ -1476,7 +1578,7 @@ func _fold_move(pos: Vector2) -> void:
 	var qp := _to_paper(pos - CENTER)
 	if qp.distance_to(fold_press) > FOLD_MIN_DRAG:
 		fold_moved = true
-	fold_cur = _fold_params(fold_P, qp)
+	fold_cur = _fold_params(fold_P, qp - fold_off)
 	if fold_cur.get("valid", false):
 		var ph := float(fold_cur["phi"])
 		if absf(ph - fold_snd_phi) > 0.3:
@@ -1770,13 +1872,12 @@ func _end_stroke() -> void:
 		meter_dirty = true
 		_spend("tape", maxi(roundi(total / TAPE_COST_PER), 1), CENTER + last + Vector2(0, -34))
 	else:
-		var had := _has_ribbon()
+		var had := _has_bow()
 		ribbon_strokes.append({"pts": pts, "len": total, "age": 0.0, "ribbon": ribbon_idx})
+		meter_dirty = true
 		var rb: Dictionary = Data.RIBBONS[ribbon_idx]
 		_spend("ribbon", maxi(roundi(total / 100.0 * float(rb["cost"])), 1), CENTER + last + Vector2(0, -34))
-		if not had and _has_ribbon():
-			bow_pop = 0.0
-			AudioSynth.play_sfx("pop_in")
+		_bow_check(had)
 
 
 ## Ближайшая к lp точка на границе бумаги: {pt, dist, inside}. Границу задаёт та же область, что и для скотча.
@@ -1847,7 +1948,6 @@ func _ribbon_press(pos: Vector2) -> void:
 		return
 	_place_ribbon(ribbon_anchor, e)
 	ribbon_anchored = false
-	_hint("Ribbon laid. Lay another one, drag the bow to resize it, or hand over the gift")
 
 
 func _place_ribbon(a: Vector2, b: Vector2) -> void:
@@ -1856,14 +1956,26 @@ func _place_ribbon(a: Vector2, b: Vector2) -> void:
 	var n := maxi(int(d / 6.0), 2)
 	for i in n + 1:
 		pts.append(a.lerp(b, float(i) / float(n)))
-	var had := _has_ribbon()
+	var had := _has_bow()
 	ribbon_strokes.append({"pts": pts, "len": d, "age": 0.0, "ribbon": ribbon_idx})
+	meter_dirty = true   # лента тоже влияет на оценку
 	var rb: Dictionary = Data.RIBBONS[ribbon_idx]
 	_spend("ribbon", maxi(roundi(d / 100.0 * float(rb["cost"])), 1), CENTER + b + Vector2(0, -34))
 	AudioSynth.play_sfx("tape_stick")
-	if not had and _has_ribbon():
-		bow_pop = 0.0
-		AudioSynth.play_sfx("pop_in")
+	_bow_check(had)
+
+
+## Лента легла: если с ней появилась пара крест-накрест, завязывается бант и игрок узнаёт, что его можно менять.
+func _bow_check(had_bow: bool) -> void:
+	if _has_bow():
+		if not had_bow:
+			bow_pop = 0.0
+			AudioSynth.play_sfx("pop_in")
+			_hint("A bow! Press it and drag away from it to make it bigger, toward it to make it smaller")
+			if _guided():
+				toast.emit("Bow tied where the ribbons cross. Press it and drag away or closer to resize it")
+		return
+	_hint("Ribbon laid. Lay a second ribbon across the first and a bow appears where they cross")
 
 
 func _ribbon_len() -> float:
@@ -1877,15 +1989,50 @@ func _has_ribbon() -> bool:
 	return _ribbon_len() >= RIBBON_MIN_LEN
 
 
-## Бант сам завязывается там, где лежит основная масса ленты.
+## Концы куска ленты (куски кладутся прямыми от края до края).
+func _ribbon_ends(i: int) -> Array:
+	var pts: PackedVector2Array = ribbon_strokes[i]["pts"]
+	return [pts[0], pts[pts.size() - 1]]
+
+
+## Две ленты крест-накрест: [i, j, точка пересечения] последней такой пары или пусто. Почти параллельные не считаются.
+func _cross_pair() -> Array:
+	var n := ribbon_strokes.size()
+	for j in range(n - 1, 0, -1):
+		var eb: Array = _ribbon_ends(j)
+		for i in range(j):
+			var ea: Array = _ribbon_ends(i)
+			var hit = Geometry2D.segment_intersects_segment(ea[0], ea[1], eb[0], eb[1])
+			if hit == null:
+				continue
+			var da: Vector2 = ((ea[1] as Vector2) - (ea[0] as Vector2)).normalized()
+			var db: Vector2 = ((eb[1] as Vector2) - (eb[0] as Vector2)).normalized()
+			if absf(da.cross(db)) < CROSS_MIN_SIN:
+				continue
+			return [i, j, hit]
+	return []
+
+
+## Бант появляется только там, где две ленты лежат крест-накрест.
+func _has_bow() -> bool:
+	return not _cross_pair().is_empty()
+
+
+## Бант сам завязывается в месте пересечения лент.
 func _bow_pos() -> Vector2:
-	if ribbon_strokes.is_empty():
+	var cp := _cross_pair()
+	if cp.is_empty():
 		return Vector2.ZERO
-	var sum := Vector2.ZERO
-	for st in ribbon_strokes:
-		var pts: PackedVector2Array = st["pts"]
-		sum += pts[pts.size() / 2]
-	return sum / float(ribbon_strokes.size())
+	return cp[2]
+
+
+## Цвет банта — цвет ленты, которой перекрестили.
+func _bow_color() -> Color:
+	var cp := _cross_pair()
+	if cp.is_empty():
+		return Color.WHITE
+	var rb: Dictionary = Data.RIBBONS[int(ribbon_strokes[int(cp[1])]["ribbon"])]
+	return Color.html(str(rb["color"]))
 
 
 ## Бант можно взять и растянуть пальцем: без инструмента по всему банту, с катушкой в руке только за самую середину
@@ -1902,6 +2049,76 @@ func _bow_hit(pos: Vector2) -> bool:
 	return (pos - CENTER - _bow_pos()).length() < 40.0 * bow_size + 8.0
 
 
+## Расстояние от точки до ломаной.
+func _dist_to_path(p: Vector2, pts: PackedVector2Array) -> float:
+	if pts.size() < 2:
+		return INF
+	var best := INF
+	for i in range(1, pts.size()):
+		best = minf(best, p.distance_to(Geometry2D.get_closest_point_to_segment(p, pts[i - 1], pts[i])))
+	return best
+
+
+## Лента или скотч под рукой (верхней рисуется лента): {kind, idx} или пусто.
+func _strip_at(pos: Vector2) -> Dictionary:
+	var lp := pos - CENTER
+	for i in range(ribbon_strokes.size() - 1, -1, -1):
+		if _dist_to_path(lp, ribbon_strokes[i]["pts"]) <= RIBBON_W * 0.5 + STRIP_PICK:
+			return {"kind": "ribbon", "idx": i}
+	for i in range(tape_strokes.size() - 1, -1, -1):
+		if _dist_to_path(lp, tape_strokes[i]["pts"]) <= TAPE_W * 0.5 + STRIP_PICK:
+			return {"kind": "tape", "idx": i}
+	return {}
+
+
+## Пустой рукой скотч и ленту можно снять. Потраченное не возвращается.
+func _remove_strip(sp: Dictionary) -> void:
+	var kind := str(sp["kind"])
+	var idx := int(sp["idx"])
+	var st: Dictionary
+	if kind == "tape":
+		if idx >= tape_strokes.size():
+			return
+		st = tape_strokes[idx]
+		tape_strokes.remove_at(idx)
+		AudioSynth.play_sfx("tape", -2.0, randf_range(1.1, 1.3))
+		meter_dirty = true
+	else:
+		if idx >= ribbon_strokes.size():
+			return
+		st = ribbon_strokes[idx]
+		ribbon_strokes.remove_at(idx)
+		meter_dirty = true
+		AudioSynth.play_sfx("ribbon", -2.0, randf_range(1.1, 1.3))
+	var pts: PackedVector2Array = st["pts"]
+	peel_fx.append({"pts": pts, "kind": kind, "ribbon": int(st.get("ribbon", 0)), "t": 0.0})
+	hover_strip = {}
+	_popup(CENTER + pts[pts.size() / 2] + Vector2(0, -24), "Off", Color(1, 0.95, 0.75))
+	if not removed_once:
+		removed_once = true
+		toast.emit("Taken off. Tape and ribbon that were used are not refunded")
+	if tape_strokes.is_empty() and ribbon_strokes.is_empty():
+		_hint("The paper is free again: fold it, tape it, or hand over the gift")
+	elif kind == "ribbon" and not _has_bow():
+		_hint("Lay a second ribbon across the first and a bow appears where they cross")
+
+
+## Что лежит под рукой без инструмента: лента, скотч или бант (для подсказок и вида руки).
+func _update_hover_items(pos: Vector2) -> void:
+	hover_strip = {}
+	hover_bow = false
+	if step != Step.WRAP or active_tool != "" or fold_drag or stroking or pulling or hover != "":
+		return
+	if bow_drag:
+		hover_bow = true
+		return
+	if _has_bow() and _bow_hit(pos):
+		hover_bow = true
+		return
+	if MAT_RECT.grow(MAT_GRAB_PAD).has_point(pos):
+		hover_strip = _strip_at(pos)
+
+
 func _neatness() -> Dictionary:
 	var fa := maxf(Fold.area(gift_hull), 1.0)
 	var cover := 0.0
@@ -1916,7 +2133,18 @@ func _neatness() -> Dictionary:
 	for st in tape_strokes:
 		tape_len += float(st["len"])
 	var tape_ok := tape_len >= 0.6 * _across()
-	var neat := 0.55 * cover + 0.20 * ends_score + (0.25 if tape_ok else 0.0)
+	# скотч: хватает ли длины на швы и ровно ли легли полоски (прямая полоска = 1, извилистая меньше)
+	var straight_sum := 0.0
+	for st in tape_strokes:
+		var tp: PackedVector2Array = st["pts"]
+		if tp.size() >= 2:
+			straight_sum += clampf(tp[0].distance_to(tp[tp.size() - 1]) / maxf(float(st["len"]), 1.0), 0.0, 1.0) * float(st["len"])
+	var tape_straight := straight_sum / maxf(tape_len, 1.0) if tape_len > 0.0 else 0.0
+	var tape_score := clampf(tape_len / (0.8 * _across()), 0.0, 1.0) * lerpf(0.6, 1.0, tape_straight)
+	var neat := 0.62 * cover + 0.18 * ends_score + 0.20 * tape_score
+	# лента (если положили): ровно по осям подарка и через середину; две ленты без перекрестья хуже
+	if not ribbon_strokes.is_empty():
+		neat = neat * 0.85 + 0.15 * _ribbon_score()
 	# торчащие сложенные куски, кривые сгибы по ребру вещи, откаты и лишние сгибы, кривой срез, виляние ножниц
 	var pen := clampf(hang / fa * 0.4, 0.0, 0.15)
 	var folds_n := 0
@@ -1931,6 +2159,32 @@ func _neatness() -> Dictionary:
 	pen += clampf(cut_wobble / 60.0, 0.0, 0.1) + clampf(cut_mark_err / 80.0, 0.0, 0.15)
 	neat -= pen
 	return {"neat": clampf(neat, 0.0, 1.0), "cover": cover, "ends": int(round(ends_score * 2.0)), "tape_len": tape_len, "tape_ok": tape_ok}
+
+
+## Насколько аккуратно лежит лента: 1 — каждая полоса по оси подарка и через его середину, есть перекрестье.
+func _ribbon_score() -> float:
+	if ribbon_strokes.is_empty():
+		return 1.0
+	var r := _poly_bounds(gift_hull) if gift_hull.size() >= 3 else Rect2(-item_w * 0.5, -item_h * 0.5, item_w, item_h)
+	var c := r.get_center()
+	var sum := 0.0
+	for st in ribbon_strokes:
+		var pts: PackedVector2Array = st["pts"]
+		if pts.size() < 2:
+			continue
+		var a := pts[0]
+		var b := pts[pts.size() - 1]
+		var d := (b - a).normalized()
+		var dl := d.rotated(-rot)
+		var align := clampf((maxf(absf(dl.x), absf(dl.y)) - 0.9) / 0.1, 0.0, 1.0)
+		var hs := (r.size.y if absf(dl.x) > absf(dl.y) else r.size.x) * 0.5
+		var off := absf((c - a).cross(d))
+		var centred := clampf(1.0 - off / maxf(hs, 1.0), 0.0, 1.0)
+		sum += lerpf(0.4, 1.0, align) * lerpf(0.5, 1.0, centred)
+	var score := sum / float(ribbon_strokes.size())
+	if ribbon_strokes.size() >= 2 and not _has_bow():
+		score *= 0.8
+	return score
 
 
 ## Выбросить текущий подарок и начать заново (потраченные материалы не возвращаются).
@@ -1962,6 +2216,7 @@ func _try_deliver() -> void:
 	var bonus := 0.0
 	var pp: Dictionary = Data.PAPERS[paper_idx]
 	bonus += float(pp["bonus"])
+	var cross := _has_bow()
 	if _has_ribbon():
 		var last_idx := int(ribbon_strokes[ribbon_strokes.size() - 1]["ribbon"])
 		var rb: Dictionary = Data.RIBBONS[last_idx]
@@ -1981,20 +2236,22 @@ func _try_deliver() -> void:
 		"crumpled": 0,
 		"tape_count": tape_strokes.size(),
 		"ribbon": rid,
-		"bow_size": bow_size,
+		"cross": cross,   # бант есть только при двух лентах крест-накрест
+		"bow_size": bow_size if cross else 1.0,
 		"wrap_choice": choice,
 		"bonus": minf(bonus, 0.2),
 		"neat": nt["neat"],
 		"cover": nt["cover"],
 		"look": {
 			"kind": item_kind, "item_id": item_id, "w": item_w, "h": item_h, "wrap_mode": look_mode,
-			"base": pp["base"], "accent": pp["accent"], "ribbon": rcol, "bow": bow_size,
+			"base": pp["base"], "accent": pp["accent"], "paper": str(pp["id"]), "ribbon": rcol, "bow": bow_size if cross else 0.0, "cross": cross,
 		},
 	}
 	bell_shake = 0.5
 	AudioSynth.play_sfx("bell")
 	step = Step.DELIVER
 	_hint("")
+	gifts_done += 1
 	gift_ready.emit(result)
 
 
@@ -2084,8 +2341,143 @@ func _draw_ribbon_path(pts: PackedVector2Array, age: float, ribbon_id: String, a
 func undo_action() -> void:
 	if ribbon_anchored:
 		_cancel_ribbon()
-	else:
+	elif not _fasteners_block():
 		fold_undo()
+
+
+## Номер ночи (с 0) от main.gd: подробное обучение идёт первые GUIDED_NIGHTS ночей.
+func set_night(n: int) -> void:
+	night = n
+
+
+## Идёт ли подробное обучение (первые ночи, пока его не закрыли крестиком).
+func _guided() -> bool:
+	if not coach_on:
+		return false
+	if night >= 0:
+		return night < GUIDED_NIGHTS
+	return gifts_done < GUIDED_GIFTS
+
+
+## Правая кнопка: убрать инструмент из руки (ленту, которую начали тянуть, тоже отпустить).
+func _drop_tool() -> void:
+	if ribbon_anchored:
+		_cancel_ribbon()
+	if active_tool == "" and not measuring:
+		return
+	active_tool = ""
+	tape_snap = {}
+	measuring = false
+	ruler_has = false
+	AudioSynth.play_sfx("click")
+	if step == Step.WRAP:
+		_hint("Empty hand: fold the paper, press tape or ribbon to take it off, or pick a tool")
+
+
+## Этап упаковки для обучения (индекс в COACH_NAMES).
+func _coach_now() -> int:
+	match step:
+		Step.CHOOSE:
+			return 0
+		Step.PAPER:
+			return 1
+		Step.PULL:
+			return 3 if pull_moved else 2
+		Step.WRAP:
+			if not tucked:
+				return 4
+			if tape_strokes.is_empty():
+				return 5
+			if ribbon_strokes.is_empty():
+				return 6
+			if not _has_bow():
+				return 7
+			return 8
+	return -1
+
+
+## Полоса этапов под шкалой качества: пройденные отмечены, текущий подсвечен; крестик прячет обучение.
+func _draw_coach() -> void:
+	if not _guided() or step < Step.CHOOSE or step > Step.WRAP:
+		return
+	var cur := _coach_now()
+	var r := COACH_RECT
+	var n := COACH_NAMES.size()
+	var w := (r.size.x - 34.0) / float(n)
+	for i in n:
+		var cr := Rect2(r.position.x + float(i) * w + 2.0, r.position.y, w - 4.0, r.size.y)
+		var col := Color(0.16, 0.11, 0.09, 0.78)
+		if i < cur:
+			col = Color(0.30, 0.45, 0.25, 0.85)
+		elif i == cur:
+			col = Color(0.85, 0.62, 0.22, 0.95 - 0.12 * absf(sin(time * 3.0)))
+		draw_rect(cr, col)
+		U.stroke(self, U.rect_pts(cr), U.INK, 2.0, time, 0.0)
+		var label := ("✓ " if i < cur else "") + str(COACH_NAMES[i])
+		_label(Vector2(cr.get_center().x, cr.position.y + 18.0), label, 14)
+	var hr := COACH_HIDE
+	draw_rect(hr, Color(0.16, 0.11, 0.09, 0.85) if hover != "coach_hide" else Color(0.5, 0.2, 0.15, 0.95))
+	U.stroke(self, U.rect_pts(hr), U.INK, 2.0, time, 0.0)
+	var c := hr.get_center()
+	draw_line(c + Vector2(-5, -5), c + Vector2(5, 5), Color(1, 0.95, 0.85), 2.5)
+	draw_line(c + Vector2(5, -5), c + Vector2(-5, 5), Color(1, 0.95, 0.85), 2.5)
+
+
+## Кольцо вокруг банта: его можно растянуть. Мигает, пока бант не растягивали (в обучении), и под рукой.
+func _draw_bow_hint(bs: float) -> void:
+	var show := hover_bow or bow_drag or (_guided() and not bow_resized)
+	if not show:
+		return
+	var c := _bow_pos()
+	var rad := 40.0 * bs + 12.0
+	var a := 0.85 if (hover_bow or bow_drag) else 0.45 + 0.35 * absf(sin(time * 3.0))
+	draw_arc(c, rad, 0.0, TAU, 40, Color(1, 0.93, 0.55, a), 3.0)
+	for k in 4:
+		var d := Vector2.RIGHT.rotated(PI * 0.25 + PI * 0.5 * float(k))
+		var p0 := c + d * (rad + 4.0)
+		var p1 := c + d * (rad + 14.0)
+		draw_line(p0, p1, Color(1, 0.93, 0.55, a), 3.0)
+		draw_line(p1, p1 - d.rotated(0.6) * 6.0, Color(1, 0.93, 0.55, a), 3.0)
+		draw_line(p1, p1 - d.rotated(-0.6) * 6.0, Color(1, 0.93, 0.55, a), 3.0)
+	if hover_bow and not bow_drag:
+		_label(c + Vector2(0.0, -rad - 18.0), "Drag away: bigger · closer: smaller", 15)
+
+
+## Полоска скотча или ленты под пустой рукой подсвечивается: её можно снять.
+func _draw_strip_hover() -> void:
+	if hover_strip.is_empty():
+		return
+	var kind := str(hover_strip["kind"])
+	var idx := int(hover_strip["idx"])
+	var arr: Array = tape_strokes if kind == "tape" else ribbon_strokes
+	if idx >= arr.size():
+		return
+	var pts: PackedVector2Array = arr[idx]["pts"]
+	var off := PackedVector2Array()
+	for q in pts:
+		off.append(CENTER + q)
+	var w := (TAPE_W if kind == "tape" else RIBBON_W) + 8.0
+	draw_polyline(off, Color(1, 0.9, 0.5, 0.35 + 0.15 * sin(time * 6.0)), w, true)
+	_label(off[off.size() / 2] + Vector2(0, -w), "Press to take off", 14)
+
+
+## Снятые полоски отлетают вверх и тают.
+func _draw_peel_fx() -> void:
+	for fx in peel_fx:
+		var t: float = fx["t"]
+		var pts: PackedVector2Array = fx["pts"]
+		var off := PackedVector2Array()
+		for q in pts:
+			off.append(CENTER + q + Vector2(0.0, -46.0 * t))
+		var col := Color(1, 1, 1, 0.55 * (1.0 - t))
+		var w := TAPE_W
+		if str(fx["kind"]) == "ribbon":
+			var rb: Dictionary = Data.RIBBONS[int(fx["ribbon"])]
+			col = Color.html(str(rb["color"]))
+			col.a = 1.0 - t
+			w = RIBBON_W
+		if off.size() >= 2:
+			draw_polyline(off, col, w * (1.0 - 0.3 * t), true)
 
 
 ## Живая оценка качества упаковки: полоса с отметкой «ниже этого клиент попросит переделать».
@@ -2468,8 +2860,21 @@ func _crease_band(cur: PackedVector2Array, n: Vector2, c: float, phi: float) -> 
 				draw_colored_polygon(q, Color(0, 0, 0, 0.22 * sin(phi) * (1.0 - 0.5 * float(k))))
 
 
+## Нарисованный свёрток (shape_<вид>_<бумага>.png), когда бумага уже обтянула силуэт; иначе null.
+func _sack_art() -> Texture2D:
+	if not (tucked and wrap_mode == "shape" and tuck_t >= 1.0 and paper_idx >= 0):
+		return null
+	return Shapes.wrap_art(item_kind, str(Data.PAPERS[paper_idx]["id"]))
+
+
 ## Готовый свёрток по форме вещи: бумага плотно обтягивает силуэт.
 func _draw_sack(paper: Dictionary) -> void:
+	var art := _sack_art()
+	if art != null:
+		_set_gift_transform()
+		draw_texture_rect(art, Shapes.art_rect(item_kind), false)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
 	var clip_p := _clip_to_paper(clip_cur)
 	if clip_p.size() < 3:
 		return
@@ -2619,7 +3024,7 @@ func _draw_gift() -> void:
 	# 2. сама вещь или коробка и собранный хвост (в системе координат стола)
 	_set_gift_transform()
 	_draw_subject(ir)
-	if shape_mode and tail_t > 0.0 and not paper.is_empty() and item.has("tail"):
+	if shape_mode and tail_t > 0.0 and not paper.is_empty() and item.has("tail") and _sack_art() == null:
 		_draw_tail(paper)
 
 	# 3. сложенная бумага всегда поверх вещи и поверх более ранних сгибов
@@ -2661,10 +3066,10 @@ func _draw_gift() -> void:
 				var gp: Vector2 = sn["pt"]
 				draw_circle(gp, 7.0 + 1.5 * sin(time * 6.0), Color(1, 0.93, 0.55, 0.9))
 				draw_arc(gp, 13.0, 0.0, TAU, 20, Color(1, 0.93, 0.55, 0.8), 2.0)
-	if _has_ribbon():
-		var last: Dictionary = Data.RIBBONS[int(ribbon_strokes[ribbon_strokes.size() - 1]["ribbon"])]
+	if _has_bow():
 		var bs := bow_size * maxf(U.ease_out_back(bow_pop), 0.01)
-		U.draw_bow(self, _bow_pos(), bs, Color.html(last["color"]), time)
+		U.draw_bow(self, _bow_pos(), bs, _bow_color(), time)
+		_draw_bow_hint(bs)
 	elif shape_mode and tucked and tail_t > 0.0 and item.has("tail"):
 		var tl2: Array = item["tail"]
 		var b2 := Vector2(float(tl2[0]), float(tl2[1]))

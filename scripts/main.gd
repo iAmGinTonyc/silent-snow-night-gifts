@@ -212,6 +212,8 @@ func _sync_counter() -> void:
 
 func _process(delta: float) -> void:
 	_sync_counter()
+	var mp: Vector2 = customer.mouth_point()
+	order.mouth = mp if mp.is_finite() else OrderCounter.MOUTH
 	if thinking and not patience_paused:
 		think_t += delta
 		order.set_thought_fill(think_t / think_time)
@@ -288,6 +290,7 @@ func _begin_evening() -> void:
 	var e := epoch
 	var ev: Dictionary = Data.EVENINGS[evening_idx]
 	_show_screen("order")
+	wrap.set_night(evening_idx)   # подробное обучение упаковки в первые ночи
 	econ.new_evening()
 	bg.set_sky(Color.html(ev["sky"]))
 	var clock: Array = ev["clock"]
@@ -547,14 +550,15 @@ func _on_gift_ready(res: Dictionary) -> void:
 	var item_id: String = res["look"]["item_id"]
 	var neat: float = res["neat"]
 
-	# кривой подарок клиент сразу просит переупаковать (кроме Санты и тех, кто дарит подарок нам)
+	# кривой подарок клиент сразу просит переупаковать (кроме Санты и тех, кто дарит подарок нам);
+	# переупаковать можно один раз: вторая кривая упаковка — клиент уходит недовольный, не заплатив
 	var outcome := "pay"
 	if neat < REWRAP_BELOW and str(current.get("scene", "")) == "" and not current.get("free", false):
-		outcome = "redo"
+		outcome = "redo" if redo_count < 1 else "refuse"
 	if outcome == "redo":
 		redo_count += 1
 		customer.set_mood(0)
-		order.show_bubble(current["name"], "That came out crooked (%d%%). Please wrap it again." % roundi(neat * 100.0))
+		order.show_bubble(current["name"], "That came out crooked. Please wrap it again.")
 		await get_tree().create_timer(2.4).timeout
 		if e != epoch:
 			return
@@ -572,11 +576,15 @@ func _on_gift_ready(res: Dictionary) -> void:
 		return
 	if outcome == "refuse":
 		customer.set_mood(0)
-		order.show_bubble(current["name"], "What is this? I am not paying for that.")
-		await get_tree().create_timer(2.8).timeout
+		customer.face_override = customer.ANGRY_FACE
+		order.show_bubble(current["name"], "Still crooked. Keep it, I am leaving.")
+		await get_tree().create_timer(0.3 if auto_play else 2.8).timeout
 		if e != epoch:
 			return
 		order.clear_gift()
+		stock.put_back(item_id, current_bad)   # игрушку не забрали: возвращается на полку
+		current_bad = ""
+		_sync_shelf()
 		await _customer_leaves(e)
 		return
 

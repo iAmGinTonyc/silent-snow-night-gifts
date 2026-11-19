@@ -25,6 +25,17 @@ const SPRITE_IDS := {
 }
 const ANGRY_FACE := 7         # восьмой кадр: клиент кричит и ругается (жалоба после смены); у Санты его нет
 const ANGRY_FALLBACK := 1     # без злого кадра берём сердитый кадр 1
+## Где рот на кадре (доля ширины и высоты картинки): туда смотрит хвостик облачка с репликой.
+## У большинства найден по разнице кадров «говорит» и «молчит», у остальных поставлен вручную.
+const MOUTHS := {
+	"aaliyah": Vector2(0.606, 0.595), "fernandez": Vector2(0.633, 0.486), "ingrid": Vector2(0.532, 0.564),
+	"lucia": Vector2(0.594, 0.467), "mateo": Vector2(0.526, 0.601), "meena": Vector2(0.643, 0.579),
+	"murphy": Vector2(0.474, 0.45), "okafor": Vector2(0.551, 0.431), "pavel": Vector2(0.625, 0.698),
+	"rosa": Vector2(0.568, 0.484), "tanaka": Vector2(0.612, 0.646), "zeynep": Vector2(0.607, 0.475),
+	"alrashid": Vector2(0.579, 0.44), "anh": Vector2(0.635, 0.51), "dmitri": Vector2(0.587, 0.72),
+	"fchristmas": Vector2(0.575, 0.58), "jin": Vector2(0.539, 0.51), "sasha": Vector2(0.584, 0.53),
+	"kwame": Vector2(0.564, 0.63), "leo": Vector2(0.59, 0.64), "santa": Vector2(0.52, 0.42),
+}
 const SPRITE_H := 224.0       # высота спрайта в единицах узла (узел ещё масштабируется)
 const SPRITE_BASE_Y := 350.0  # нижний срез спрайта прячется за прилавком
 const FACE_FPS := 14.0        # сколько кадров лица в секунду проходит анимация
@@ -125,6 +136,19 @@ func _face_target() -> int:
 	if worry > 0.3:
 		return 1
 	return 0
+
+
+## Рот клиента в координатах родителя (там же, где прилавок и облачко). Нет кадров: Vector2.INF.
+func mouth_point() -> Vector2:
+	if sprite.is_empty():
+		return Vector2.INF
+	var id: String = SPRITE_IDS.get(str(data.get("name", "")), "")
+	var m: Vector2 = MOUTHS.get(id, Vector2(0.55, 0.5))
+	var tex: Texture2D = sprite[0]
+	var k := SPRITE_H / float(tex.get_height())
+	var sz := Vector2(tex.get_width(), tex.get_height()) * k
+	var local := Vector2(-sz.x * 0.5, SPRITE_BASE_Y - sz.y) + Vector2(m.x * sz.x, m.y * sz.y)
+	return position + local * scale
 
 
 func leave() -> void:

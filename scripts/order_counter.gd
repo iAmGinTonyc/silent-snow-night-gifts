@@ -76,11 +76,12 @@ const SHELF_VIEW_SCALE := 1.6
 const BACK_BTN := Rect2(34, 650, 170, 48)
 const CUSTOMER_HAND := Vector2(520, 470)
 const GIFT_POS := Vector2(565, 548)
+const SURFACE_Y := 584.0   # высота, на которой стоит всё, что лежит на прилавке: чуть за передним краем столешницы
 const KEEP_POS := Vector2(930, 556)   # подарки, которые подарили нам самим, остаются на прилавке
 const KEEP_STEP := 92.0               # следующий такой подарок встаёт левее
 const KEEP_SCALE := 0.36
 const TABLE_ITEM_SCALE := 1.5   # игрушка на столе крупнее, чем на полке: её нужно нажать
-const MOUTH := Vector2(555, 300)
+const MOUTH := Vector2(555, 300)   # куда смотрит хвостик облачка, если рот клиента неизвестен
 
 # Вывески сверху и две плашки внизу (вставки для текста)
 const TOP_PLAQUES := [Rect2(112, 12, 246, 64), Rect2(386, 12, 248, 64), Rect2(660, 12, 246, 64), Rect2(932, 12, 248, 64)]
@@ -105,6 +106,7 @@ var bubble_text := ""
 var bubble_kind := "speech"   # speech или thought (мысли клиента)
 var bubble_name := ""
 var bubble_t := 1.0
+var mouth := MOUTH            # рот клиента на экране (ставит main каждый кадр)
 var offer_enabled := false
 var shelf_hover_id := ""      # какая игрушка под мышью на полке крупным планом
 var stock_counts: Dictionary = {}   # {item_id: сколько штук}; пока set_stock не вызывали, запас не ограничен
@@ -256,7 +258,22 @@ func _gift_rect() -> Rect2:
 	if table_item == "":
 		return Rect2()
 	var sz := _item_size(table_item) * TABLE_ITEM_SCALE
-	return Rect2(GIFT_POS - sz * 0.5, sz).grow(16.0)
+	return Rect2(_table_center(sz) - sz * 0.5, sz).grow(16.0)
+
+
+## Центр предмета размера sz, который стоит на прилавке (низом на SURFACE_Y).
+func _table_center(sz: Vector2) -> Vector2:
+	return Vector2(GIFT_POS.x, SURFACE_Y - sz.y * 0.5)
+
+
+## Низ и середина нарисованного подарка в его собственных координатах (до масштаба).
+func _look_anchor(poly: PackedVector2Array) -> Vector2:
+	if poly.is_empty():
+		return Vector2.ZERO
+	var r := Rect2(poly[0], Vector2.ZERO)
+	for q in poly:
+		r = r.expand(q)
+	return Vector2(r.get_center().x, r.end.y)
 
 
 func show_gift(look: Dictionary) -> void:
@@ -681,17 +698,26 @@ func _draw_bubble() -> void:
 			var sp := Vector2(rect.position.x + 40.0 + float(k) * (rect.size.x - 80.0) / 3.0, rect.position.y - 8.0 + 4.0 * sin(time * 3.0 + float(k)))
 			draw_colored_polygon(U.star(sp, 7.0, 2.6, 4, time + float(k)), Color(0.7, 0.8, 1.0, 0.6 + 0.4 * sin(time * 4.0 + float(k))))
 	else:
-		draw_style_box(bubble_style, rect)
-		# хвостик: контур рисуем только снаружи облачка (от левого края к рту), иначе линии заходят на текст
+		# хвостик ото рта: сначала хвостик с контуром, поверх облачко (закрывает его основание),
+		# потом заливка стирает рамку облачка между краями хвостика. Основание выше скруглённого угла.
 		var bx := rect.position.x
-		var p0 := Vector2(bx + 30.0, rect.end.y - 60.0)
-		var p1 := Vector2(bx + 30.0, rect.end.y - 16.0)
-		if MOUTH.x < bx - 8.0:
-			var b0 := p0.lerp(MOUTH, (bx - p0.x) / (MOUTH.x - p0.x))
-			var b1 := p1.lerp(MOUTH, (bx - p1.x) / (MOUTH.x - p1.x))
-			draw_colored_polygon(PackedVector2Array([b0 + Vector2(5.0, 0.0), b0, MOUTH, b1, b1 + Vector2(5.0, 0.0)]), BUBBLE_COLOR)
-			draw_polyline(PackedVector2Array([b0, MOUTH, b1]), U.INK, 4.0, true)
-			draw_rect(Rect2(bx - 2.5, b0.y + 2.0, 9.0, b1.y - b0.y - 4.0), BUBBLE_COLOR)   # убирает край облачка между концами хвостика
+		var tip := mouth + Vector2(10.0, -4.0)   # кончик чуть правее и выше рта, не на губах
+		var has_tail := tip.x < bx - 8.0
+		var tri := PackedVector2Array()
+		if has_tail:
+			var y1 := rect.end.y - 36.0
+			var y0 := maxf(y1 - 40.0, rect.position.y + 30.0)
+			tri = PackedVector2Array([Vector2(bx + 16.0, y0), tip, Vector2(bx + 16.0, y1)])
+			draw_colored_polygon(tri, BUBBLE_COLOR)
+			draw_polyline(PackedVector2Array([tri[0], tip, tri[2]]), U.INK, 4.0, true)
+		draw_style_box(bubble_style, rect)
+		if has_tail:
+			var inner := Geometry2D.offset_polygon(tri, -2.4)
+			if inner.size() > 0:
+				var band := PackedVector2Array([Vector2(bx - 14.0, rect.position.y), Vector2(bx + 14.0, rect.position.y),
+					Vector2(bx + 14.0, rect.end.y), Vector2(bx - 14.0, rect.end.y)])
+				for piece in Geometry2D.intersect_polygons(inner[0], band):
+					draw_colored_polygon(piece, BUBBLE_COLOR)
 	draw_string(font, Vector2(rect.position.x + BUBBLE_PAD, rect.position.y + 40.0), bubble_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.62, 0.38, 0.26) if bubble_kind == "speech" else Color(0.32, 0.4, 0.62))
 	draw_multiline_string(font, Vector2(rect.position.x + BUBBLE_PAD, rect.position.y + 52.0 + font.get_ascent(BUBBLE_FONT)), bubble_text,
 		HORIZONTAL_ALIGNMENT_LEFT, BUBBLE_W - 2.0 * BUBBLE_PAD, BUBBLE_FONT, -1, U.INK)
@@ -733,13 +759,14 @@ func _draw_give() -> void:
 		return
 	var sz := _item_size(table_item) * TABLE_ITEM_SCALE
 	var a := clampf(table_t, 0.0, 1.0)
+	var c := _table_center(sz)   # игрушка стоит низом на столешнице
 	if gift_clickable:
 		var pulse := 0.5 + 0.5 * sin(time * 4.0)
-		draw_circle(GIFT_POS, maxf(sz.x, sz.y) * 0.62 + 5.0 * pulse, Color(1.0, 0.93, 0.55, 0.14 + 0.14 * pulse))
-	draw_colored_polygon(U.ellipse(GIFT_POS + Vector2(0.0, sz.y * 0.5), sz.x * 0.42, 7.0), Color(0, 0, 0, 0.22 * a))
-	draw_texture_rect(T_ITEMS[table_item], Rect2(GIFT_POS - sz * 0.5, sz), false, Color(1, 1, 1, a))
+		draw_circle(c, maxf(sz.x, sz.y) * 0.62 + 5.0 * pulse, Color(1.0, 0.93, 0.55, 0.14 + 0.14 * pulse))
+	draw_colored_polygon(U.ellipse(Vector2(c.x, SURFACE_Y - 2.0), sz.x * 0.44, 7.0), Color(0, 0, 0, 0.26 * a))
+	draw_texture_rect(T_ITEMS[table_item], Rect2(c - sz * 0.5, sz), false, Color(1, 1, 1, a))
 	if gift_clickable:
-		_txt(GIFT_POS + Vector2(-110.0, -sz.y * 0.5 - 16.0), U.touch_text("Click to wrap"), 22, Color(1, 0.96, 0.85), true, HORIZONTAL_ALIGNMENT_CENTER, 220.0)
+		_txt(c + Vector2(-110.0, -sz.y * 0.5 - 16.0), U.touch_text("Click to wrap"), 22, Color(1, 0.96, 0.85), true, HORIZONTAL_ALIGNMENT_CENTER, 220.0)
 
 
 func _draw_gift() -> void:
@@ -747,21 +774,31 @@ func _draw_gift() -> void:
 		return
 	var e := U.ease_out_back(gift_t)
 	var s := 0.62 * maxf(e, 0.001)
-	_draw_look(gift_look, gift_poly, GIFT_POS + Vector2(0.0, 12.0 * (1.0 - e)), s)
+	# подарок стоит низом на столешнице, под ним тень
+	var anc := _look_anchor(gift_poly)
+	var r := Rect2(gift_poly[0], Vector2.ZERO) if not gift_poly.is_empty() else Rect2()
+	for q in gift_poly:
+		r = r.expand(q)
+	draw_colored_polygon(U.ellipse(Vector2(GIFT_POS.x, SURFACE_Y - 2.0), maxf(r.size.x * s * 0.5, 4.0), 8.0), Color(0, 0, 0, 0.28 * minf(gift_t * 2.0, 1.0)))
+	_draw_look(gift_look, gift_poly, Vector2(GIFT_POS.x, SURFACE_Y) - anc * s + Vector2(0.0, -10.0 * (1.0 - e)), s)
 
 
 func _draw_keepsakes() -> void:
 	for i in keepsakes.size():
 		var k: Dictionary = keepsakes[i]
 		var t := U.ease_in_out(float(k["t"]))
-		var dst := KEEP_POS - Vector2(KEEP_STEP * float(i), 0.0)
-		var pos := GIFT_POS.lerp(dst, t) + Vector2(0.0, -60.0 * sin(t * PI))
 		var look: Dictionary = k["look"]
 		var poly: PackedVector2Array = k["poly"]
-		var h := float(look["h"]) if look["wrap_mode"] != "shape" else 200.0
 		var s := lerpf(0.62, KEEP_SCALE, t)
-		# низ подарка стоит на прилавке
-		_draw_look(look, poly, pos - Vector2(0.0, h * 0.5 * (s - KEEP_SCALE)), s)
+		# низ подарка едет по столешнице к своему месту (с небольшой дугой) и стоит на прилавке
+		var from := Vector2(GIFT_POS.x, SURFACE_Y)
+		var to := Vector2(KEEP_POS.x - KEEP_STEP * float(i), SURFACE_Y - 6.0)
+		var bottom := from.lerp(to, t) + Vector2(0.0, -60.0 * sin(t * PI))
+		var r := Rect2(poly[0], Vector2.ZERO) if not poly.is_empty() else Rect2()
+		for q in poly:
+			r = r.expand(q)
+		draw_colored_polygon(U.ellipse(Vector2(bottom.x, to.y - 2.0), maxf(r.size.x * s * 0.5, 4.0), 6.0), Color(0, 0, 0, 0.24 * t))
+		_draw_look(look, poly, bottom - _look_anchor(poly) * s, s)
 
 
 func _draw_look(look: Dictionary, poly: PackedVector2Array, pos: Vector2, s: float) -> void:
@@ -776,6 +813,16 @@ func _draw_look(look: Dictionary, poly: PackedVector2Array, pos: Vector2, s: flo
 	var ribbon_col := Color.html(look["ribbon"]) if look["ribbon"] != "" else Color(0, 0, 0, 0)
 	var has_ribbon: bool = look["ribbon"] != ""
 	var bow: float = look["bow"]
+	# нарисованный свёрток по контуру (в цвете бумаги), если он есть
+	var art: Texture2D = Shapes.wrap_art(str(look["kind"]), str(look.get("paper", ""))) if shape else null
+	if art != null:
+		draw_texture_rect(art, Shapes.art_rect(str(look["kind"])), false)
+		if has_ribbon and not tail_data.is_empty() and bow > 0.0:
+			var tb := Vector2(float(tail_data[0]), float(tail_data[1]))
+			var td := Vector2(float(tail_data[2]), float(tail_data[3]))
+			U.draw_bow(self, tb + td * 6.0, bow * 0.8, ribbon_col, time)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
 	# собранный хвост
 	if not tail_data.is_empty():
 		var b := Vector2(float(tail_data[0]), float(tail_data[1]))

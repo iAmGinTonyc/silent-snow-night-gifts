@@ -5,6 +5,27 @@ const U = preload("res://scripts/util.gd")
 
 static var _cache := {}
 
+## Нарисованная упаковка по контуру: art/wrap/shape_<вид>_<бумага>.png (свёрток с хвостом в цвете и узоре бумаги)
+## и где картинка лежит в координатах вещи. Нет картинки — свёрток рисуется кодом, как раньше.
+const ART_RECT := {
+	"ball": [-82.83, -82.39, 198.91, 165.65], "bear": [-80.0, -131.05, 159.74, 226.58],
+	"ornament": [-61.3, -96.09, 121.96, 163.04], "train": [-120.6, -39.2, 279.0, 78.0],
+}
+static var _art := {}
+
+
+static func wrap_art(kind: String, paper_id: String) -> Texture2D:
+	var key := kind + ":" + paper_id
+	if not _art.has(key):
+		var path := "res://art/wrap/shape_%s_%s.png" % [kind, paper_id]
+		_art[key] = load(path) if (ART_RECT.has(kind) and ResourceLoader.exists(path)) else null
+	return _art[key]
+
+
+static func art_rect(kind: String) -> Rect2:
+	var r: Array = ART_RECT.get(kind, [0, 0, 0, 0])
+	return Rect2(float(r[0]), float(r[1]), float(r[2]), float(r[3]))
+
 
 static func silhouette(kind: String) -> PackedVector2Array:
 	if _cache.has(kind):
