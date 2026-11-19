@@ -2,7 +2,7 @@
 import json, sys
 from PIL import Image, ImageDraw
 
-CUST = "/Users/anton/Desktop/spoon it/lentochka/art/customers/"
+CUST = "/Users/anton/Desktop/spoon it/silent snow night gifts/art/customers/"
 SCR = "/private/tmp/claude-501/-Users-anton-Desktop-spoon-it/d9d7f96f-f433-4f73-99e0-e93020e0a7a6/scratchpad/"
 SHEETS = [
     ["aaliyah", "alrashid", "anh", "dmitri", "fchristmas", "fernandez", "ingrid", "jin", "kwame", "leo"],

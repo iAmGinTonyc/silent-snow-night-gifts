@@ -9,7 +9,7 @@ Image.MAX_IMAGE_PIXELS = None
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from make_customers import grid, flood
 
-SRC = "/Users/anton/Desktop/spoon it/lentochka/art/source/"
+SRC = "/Users/anton/Desktop/spoon it/silent snow night gifts/art/source/"
 SCR = os.path.dirname(os.path.abspath(__file__)) + "/"
 T = 34.0
 INSET = 16

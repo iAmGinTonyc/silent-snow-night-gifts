@@ -10,7 +10,7 @@ sys.path.insert(0, SCR)
 from recut_customers import flood_fast, components, pool, up
 from pal_alpha import save as pal_save
 
-P = "/Users/anton/Desktop/spoon it/lentochka/"
+P = "/Users/anton/Desktop/spoon it/silent snow night gifts/"
 S = SCR + "shape/"
 PX = 2.0          # пикселей на единицу вещи
 layout = json.load(open(S + "layout.json"))

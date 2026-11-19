@@ -6,7 +6,7 @@ Image.MAX_IMAGE_PIXELS = None
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from recut_customers import flood_fast, components, pool, up, T
 
-SRC = "/Users/anton/Desktop/spoon it/lentochka/art/source/santa_sheet.png"
+SRC = "/Users/anton/Desktop/spoon it/silent snow night gifts/art/source/santa_sheet.png"
 OUT = sys.argv[1]
 TARGET_H = 480
 KEEP = 0.66

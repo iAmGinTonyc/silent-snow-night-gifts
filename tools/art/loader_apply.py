@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 SRC = "loader_before_align.png"
-OUT = "/Users/anton/Desktop/spoon it/lentochka/web/loader.png"
+OUT = "/Users/anton/Desktop/spoon it/silent snow night gifts/web/loader.png"
 im = Image.open(SRC).convert("RGBA")
 N, C = 6, 256
 corr = [tuple(int(v) for v in c) for c in np.load("loader_corr.npy")]

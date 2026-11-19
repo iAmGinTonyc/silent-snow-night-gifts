@@ -1,7 +1,7 @@
 # Выравнивание кадров загрузчика: коробка не должна ездить по кадру.
 import numpy as np
 from PIL import Image
-SRC = "/Users/anton/Desktop/spoon it/lentochka/web/loader.png"
+SRC = "/Users/anton/Desktop/spoon it/silent snow night gifts/web/loader.png"
 im = Image.open(SRC).convert("RGBA")
 N, C = 6, 256
 fr = [im.crop(((i % N) * C, (i // N) * C, (i % N + 1) * C, (i // N + 1) * C)) for i in range(N * N)]

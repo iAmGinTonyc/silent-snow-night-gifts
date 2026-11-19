@@ -8,7 +8,7 @@ SCR = os.path.dirname(os.path.abspath(__file__)) + "/"
 sys.path.insert(0, SCR)
 from recut_customers import matte
 
-OLD = "/Users/anton/Desktop/spoon it/lentochka/art/customers/"
+OLD = "/Users/anton/Desktop/spoon it/silent snow night gifts/art/customers/"
 
 
 def finish(rgb_img, mask, scale):

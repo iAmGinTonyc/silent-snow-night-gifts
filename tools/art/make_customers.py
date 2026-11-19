@@ -4,8 +4,8 @@ import numpy as np
 from PIL import Image, ImageFilter
 Image.MAX_IMAGE_PIXELS = None
 
-SRC = "/Users/anton/Desktop/spoon it/lentochka/art/source/"
-OUT = "/Users/anton/Desktop/spoon it/lentochka/art/customers/"
+SRC = "/Users/anton/Desktop/spoon it/silent snow night gifts/art/source/"
+OUT = "/Users/anton/Desktop/spoon it/silent snow night gifts/art/customers/"
 SCR = "/private/tmp/claude-501/-Users-anton-Desktop-spoon-it/d9d7f96f-f433-4f73-99e0-e93020e0a7a6/scratchpad/"
 TARGET_H, INSET, T = 360, 16, 34.0
 SPECK_MIN = 70

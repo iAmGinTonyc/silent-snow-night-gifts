@@ -6,7 +6,7 @@ from PIL import Image, ImageFilter
 Image.MAX_IMAGE_PIXELS = None
 
 S = "/private/tmp/claude-501/-Users-anton-Desktop-spoon-it/d9d7f96f-f433-4f73-99e0-e93020e0a7a6/scratchpad/ext/"
-P = "/Users/anton/Desktop/spoon it/lentochka/"
+P = "/Users/anton/Desktop/spoon it/silent snow night gifts/"
 FEATHER = 28
 
 JOBS = {

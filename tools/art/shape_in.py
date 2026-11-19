@@ -4,7 +4,7 @@ import json, math
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-P = "/Users/anton/Desktop/spoon it/lentochka/"
+P = "/Users/anton/Desktop/spoon it/silent snow night gifts/"
 S = "/private/tmp/claude-501/-Users-anton-Desktop-spoon-it/d9d7f96f-f433-4f73-99e0-e93020e0a7a6/scratchpad/shape/"
 import os
 os.makedirs(S, exist_ok=True)
