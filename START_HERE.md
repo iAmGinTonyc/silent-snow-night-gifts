@@ -31,7 +31,7 @@ godot --headless --path . --quit-after 40
 ```bash
 godot --headless --path . --script res://tools/smoke.gd
 ```
-Автотест трёх ночей. Ожидается `DONE served=22 failed=false` (число визитов зависит от предзаказов и отказов) и ни одного `ERROR`.
+Автотест трёх ночей. Ожидается `DONE served=22` или `23` и `failed=false` (число визитов меняется: предзаказы, отказ после второй кривой упаковки) и ни одного `ERROR`.
 
 ```bash
 godot --headless --path . --script res://tools/test_fold.gd
