@@ -1,0 +1,14 @@
+{
+	"name": "Silent Snow Night Gifts",
+	"short_name": "Snow Night Gifts",
+	"start_url": "./index.html",
+	"scope": "./",
+	"display": "fullscreen",
+	"orientation": "landscape",
+	"background_color": "#0e1432",
+	"theme_color": "#0e1432",
+	"icons": [
+		{ "src": "index.icon.png", "sizes": "128x128", "type": "image/png" },
+		{ "src": "index.apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+	]
+}
